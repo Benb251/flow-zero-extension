@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FlowZero - Flow Watermark Remover</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div class="brand">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+        </div>
+        <div class="title-group">
+          <h1>FlowZero</h1>
+          <span class="version">v1.1.0</span>
+        </div>
+      </div>
+      <div class="status-badge" id="statusBadge">Active</div>
+    </div>
+
+    <p class="description">Tự động xóa watermark khi tải hình ảnh từ Google Flow</p>
+
+    <div class="toggle-row">
+      <span class="toggle-label">Hiển thị nút FlowZero trên trang</span>
+      <label class="switch">
+        <input type="checkbox" id="toggleEnabled" checked>
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="quality-info-box">
+      <div class="quality-title">Tùy chọn chất lượng khi hover nút:</div>
+      <div class="quality-tags">
+        <span class="q-tag q-1k">1K Standard</span>
+        <span class="q-tag q-2k">2K HD</span>
+        <span class="q-tag q-4k">🔒 4K Ultra</span>
+      </div>
+    </div>
+
+    <div class="stats-box">
+      <div class="stat-item">
+        <span class="stat-value" id="cleanedCount">0</span>
+        <span class="stat-label">Ảnh đã xóa Watermark</span>
+      </div>
+    </div>
+
+    <div class="actions">
+      <a href="https://labs.google/fx/tools/flow" target="_blank" class="btn btn-primary">
+        Mở Google Flow ↗
+      </a>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
