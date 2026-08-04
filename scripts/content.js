@@ -8,6 +8,17 @@
   const PROCESSED_ATTR = "data-flowzero-injected";
 
   let isExtensionEnabled = true;
+  let userFlowTier = "FREE";
+
+  // Listen for tier detection from Main World Interceptor
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || !event.data) return;
+    if (event.data.type === "FLOWZERO_TIER_DETECTED" && event.data.tier) {
+      userFlowTier = event.data.tier;
+      chrome.storage.local.set({ flowzero_detected_tier: userFlowTier });
+      updateButtonsVisibility();
+    }
+  });
 
   // Inject modern CSS styles for FlowZero UI elements & hover quality menu
   function injectStyles() {
@@ -26,91 +37,71 @@
         align-items: flex-end;
         user-select: none;
         padding-top: 10px; /* Seamless hover bounding area */
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.2s ease, visibility 0.2s ease;
+      }
+
+      .flowzero-container:hover .${WRAPPER_CLASS},
+      .${WRAPPER_CLASS}.is-hovered {
+        opacity: 1;
+        visibility: visible;
       }
 
       .flowzero-hidden {
         display: none !important;
       }
 
-      /* Main Trigger Button */
       .flowzero-main-btn {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        padding: 6px 12px;
-        background: rgba(15, 23, 42, 0.90);
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-        border: 1px solid rgba(168, 85, 247, 0.4);
-        border-radius: 14px;
-        color: #ffffff;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        font-size: 11.5px;
-        font-weight: 600;
+        justify-content: center;
+        padding: 4px; /* Minimal padding */
+        background: transparent;
+        border: none;
         cursor: pointer;
-        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s ease;
       }
 
       .flowzero-main-btn:hover,
       .${WRAPPER_CLASS}.is-hovered .flowzero-main-btn {
-        background: rgba(30, 41, 59, 0.98);
-        border-color: #a855f7;
-        transform: translateY(-1px) scale(1.02);
-        box-shadow: 0 6px 18px rgba(168, 85, 247, 0.45);
+        transform: translateY(-1px) scale(1.1);
+        filter: drop-shadow(0 4px 10px rgba(168, 85, 247, 0.6)); /* Glow effect directly on the icon shape */
       }
 
       .flowzero-main-btn:active {
-        transform: translateY(0) scale(0.98);
+        transform: translateY(0) scale(0.95);
       }
 
-      .flowzero-main-btn svg.flowzero-logo-icon {
-        width: 13px;
-        height: 13px;
-        fill: none;
-        stroke: #a855f7;
-        stroke-width: 2.5;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-        transition: stroke 0.2s ease;
+      .flowzero-main-btn .flowzero-logo-icon {
+        width: 32px; /* Scaled up to cover the old button area */
+        height: 32px;
+        object-fit: contain;
+        transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
       }
 
-      .flowzero-main-btn:hover svg.flowzero-logo-icon,
-      .${WRAPPER_CLASS}.is-hovered svg.flowzero-logo-icon {
-        stroke: #c084fc;
-      }
-
-      .flowzero-chevron {
-        font-size: 8px;
-        opacity: 0.75;
-        transition: transform 0.2s ease;
-        margin-left: 2px;
-      }
-
-      .${WRAPPER_CLASS}:hover .flowzero-chevron,
-      .${WRAPPER_CLASS}.is-hovered .flowzero-chevron {
-        transform: rotate(180deg);
+      .flowzero-main-btn:hover .flowzero-logo-icon,
+      .${WRAPPER_CLASS}.is-hovered .flowzero-logo-icon {
+        transform: scale(1.1);
       }
 
       /* Loading & Success States */
       .flowzero-main-btn.is-loading {
         pointer-events: none;
-        opacity: 0.9;
-        border-color: #3b82f6;
       }
 
-      .flowzero-main-btn.is-loading svg.flowzero-logo-icon {
-        stroke: #3b82f6;
+      .flowzero-main-btn.is-loading .flowzero-logo-icon {
+        opacity: 0.7;
         animation: flowzero-spin 1s linear infinite;
       }
 
       .flowzero-main-btn.is-success {
-        background: rgba(22, 101, 52, 0.95);
-        border-color: #22c55e;
+        /* No border changes needed */
       }
 
-      .flowzero-main-btn.is-success svg.flowzero-logo-icon {
-        stroke: #22c55e;
+      .flowzero-main-btn.is-success .flowzero-logo-icon {
+        transform: scale(1.15);
+        filter: drop-shadow(0 0 4px rgba(34, 197, 94, 0.6));
       }
 
       @keyframes flowzero-spin {
@@ -118,19 +109,19 @@
         to { transform: rotate(360deg); }
       }
 
-      /* Hover Dropdown Menu */
+      /* Hover Dropdown Menu - Glassmorphism Light Theme */
       .flowzero-dropdown-menu {
         position: absolute;
-        bottom: calc(100% + 4px);
+        bottom: calc(100% + 8px);
         right: 0;
-        width: 210px;
-        background: rgba(15, 23, 42, 0.96);
-        backdrop-filter: blur(14px);
-        -webkit-backdrop-filter: blur(14px);
-        border: 1px solid rgba(255, 255, 255, 0.16);
-        border-radius: 14px;
+        width: 60px;
+        background: rgba(255, 255, 255, 0.15); /* Soft light glass */
+        backdrop-filter: blur(24px) saturate(1.5);
+        -webkit-backdrop-filter: blur(24px) saturate(1.5);
+        border: none;
+        border-radius: 12px;
         padding: 6px;
-        box-shadow: 0 14px 34px rgba(0, 0, 0, 0.65);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
         opacity: 0;
         visibility: hidden;
         transform: translateY(6px) scale(0.96);
@@ -161,94 +152,44 @@
         pointer-events: auto;
       }
 
-      .flowzero-menu-header {
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 0.6px;
-        color: #94a3b8;
-        text-transform: uppercase;
-        padding: 6px 10px 4px 10px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-        margin-bottom: 4px;
-      }
-
       .flowzero-menu-item {
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        justify-content: center;
         width: 100%;
-        padding: 8px 10px;
+        padding: 8px 4px;
         background: transparent;
         border: none;
         border-radius: 8px;
-        color: #f1f5f9;
+        color: #ffffff;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        font-size: 12px;
+        font-size: 13px;
+        font-weight: 800;
         cursor: pointer;
-        text-align: left;
-        transition: all 0.15s ease;
+        text-align: center;
+        transition: all 0.2s ease;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.2);
       }
 
       .flowzero-menu-item:hover {
-        background: rgba(168, 85, 247, 0.22);
+        background: rgba(255, 255, 255, 0.25);
         color: #ffffff;
-        transform: translateX(-2px);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
       }
 
       .flowzero-menu-item:active {
-        transform: scale(0.97);
-      }
-
-      .flowzero-item-left {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-
-      .flowzero-res-icon {
-        font-weight: 700;
-        font-size: 11px;
-        color: #a855f7;
-        width: 22px;
-        text-align: center;
-      }
-
-      .flowzero-item-title {
-        font-weight: 500;
-      }
-
-      /* Badges */
-      .flowzero-badge {
-        font-size: 9.5px;
-        font-weight: 700;
-        padding: 2px 6px;
-        border-radius: 6px;
-        text-transform: uppercase;
-      }
-
-      .badge-free {
-        background: rgba(148, 163, 184, 0.2);
-        color: #cbd5e1;
-      }
-
-      .badge-hd {
-        background: rgba(59, 130, 246, 0.25);
-        color: #60a5fa;
-        border: 1px solid rgba(59, 130, 246, 0.4);
-      }
-
-      .badge-ultra {
-        background: linear-gradient(135deg, rgba(245, 158, 11, 0.3), rgba(239, 68, 68, 0.3));
-        color: #fbbf24;
-        border: 1px solid rgba(245, 158, 11, 0.5);
+        transform: scale(0.95);
+        background: rgba(255, 255, 255, 0.35);
       }
 
       .flowzero-menu-item.is-locked {
-        opacity: 0.85;
+        opacity: 0.7;
+        color: rgba(255, 255, 255, 0.7);
+        text-shadow: none;
       }
 
       .flowzero-menu-item.is-locked:hover {
-        background: rgba(245, 158, 11, 0.18);
+        background: rgba(255, 255, 255, 0.1);
       }
 
       /* Toast Notification */
@@ -261,14 +202,17 @@
         align-items: center;
         gap: 10px;
         padding: 12px 18px;
-        background: #0f172a;
-        border: 1px solid rgba(168, 85, 247, 0.4);
+        background: rgba(255, 255, 255, 0.15);
+        backdrop-filter: blur(24px) saturate(1.5);
+        -webkit-backdrop-filter: blur(24px) saturate(1.5);
+        border: 1px solid rgba(255, 255, 255, 0.3);
         border-radius: 12px;
-        color: #f8fafc;
+        color: #ffffff;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         font-size: 13.5px;
         font-weight: 500;
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+        text-shadow: 0 1px 3px rgba(0,0,0,0.2);
         animation: flowzero-toast-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
       }
 
@@ -543,7 +487,7 @@
       if (text.toUpperCase().startsWith(resUpper) || text.toUpperCase().includes(resUpper)) {
         if (item.getAttribute("aria-disabled") === "true" || item.hasAttribute("disabled")) {
           console.warn(`[FlowZero] Option ${resUpper} is disabled in Flow.`);
-          showToast(`🔒 Tùy chọn ${resUpper} không khả dụng cho tài khoản hiện tại`, "warning", 3500);
+          showToast(`Tùy chọn ${resUpper} không khả dụng cho tài khoản hiện tại`, "warning", 3500);
           return false;
         }
         targetSubItem = item;
@@ -584,7 +528,7 @@
     try {
       // If 2K or 4K, attempt native Flow upscale automation first
       if (resKey === "2k" || resKey === "4k") {
-        showToast(`⚡ Đang yêu cầu Google Flow upscale ${resKey.toUpperCase()} & xóa watermark...`, "info", 4000);
+        showToast(`Đang yêu cầu Google Flow upscale ${resKey.toUpperCase()} & xóa watermark...`, "info", 4000);
         const menuTriggered = await triggerFlowNativeDownload(targetContainer, resKey);
         if (menuTriggered) {
           // Flow native download will trigger and interceptor.js will capture and clean it!
@@ -626,10 +570,10 @@
       // Success state
       btn.classList.remove("is-loading");
       btn.classList.add("is-success");
-      if (labelSpan) labelSpan.textContent = response.cleaned ? `✓ Đã lưu ${resKey.toUpperCase()} sạch!` : `✓ Đã tải ${resKey.toUpperCase()}!`;
+      
       showToast(
         response.cleaned
-          ? `✓ Đã xóa watermark & lưu ảnh ${resKey.toUpperCase()} thành công!`
+          ? `Đã xóa watermark & lưu ảnh ${resKey.toUpperCase()} thành công!`
           : `Đã tải hình ảnh ${resKey.toUpperCase()} về máy!`,
         "success"
       );
@@ -650,17 +594,35 @@
   // Update visibility of all injected FlowZero buttons
   function updateButtonsVisibility() {
     const wrappers = document.querySelectorAll(`.${WRAPPER_CLASS}`);
+    const isUltra = userFlowTier.includes("PAYGATE_TIER_") && 
+                    !userFlowTier.includes("NOT_PAID") && 
+                    !userFlowTier.includes("PAYGATE_TIER_ONE");
     wrappers.forEach((w) => {
       if (isExtensionEnabled) {
         w.classList.remove("flowzero-hidden");
       } else {
         w.classList.add("flowzero-hidden");
       }
+
+      const btn4k = w.querySelector('.flowzero-menu-item[data-quality="4k"]');
+      if (btn4k) {
+        if (isUltra) {
+          btn4k.classList.remove("flowzero-hidden");
+          btn4k.classList.remove("is-locked");
+          btn4k.title = "4K";
+        } else {
+          btn4k.classList.add("flowzero-hidden");
+        }
+      }
     });
   }
 
   // Inject FlowZero button + Hover Quality Menu into image containers
   function injectButtonInto(container) {
+    if (container.tagName === "IMG") {
+      container = container.parentElement;
+    }
+    if (!container) return;
     if (container.hasAttribute(PROCESSED_ATTR)) return;
     container.setAttribute(PROCESSED_ATTR, "true");
 
@@ -668,6 +630,7 @@
     if (computedStyle.position === "static") {
       container.style.position = "relative";
     }
+    container.classList.add("flowzero-container");
 
     const wrapper = document.createElement("div");
     wrapper.className = WRAPPER_CLASS;
@@ -677,36 +640,17 @@
 
     wrapper.innerHTML = `
       <div class="flowzero-dropdown-menu">
-        <div class="flowzero-menu-header">Tùy chọn chất lượng</div>
-        <button class="flowzero-menu-item" data-quality="1k">
-          <div class="flowzero-item-left">
-            <span class="flowzero-res-icon">1K</span>
-            <span class="flowzero-item-title">Chuẩn (1K)</span>
-          </div>
-          <span class="flowzero-badge badge-free">Free</span>
-        </button>
-        <button class="flowzero-menu-item" data-quality="2k">
-          <div class="flowzero-item-left">
-            <span class="flowzero-res-icon">2K</span>
-            <span class="flowzero-item-title">Sắc nét (2K)</span>
-          </div>
-          <span class="flowzero-badge badge-hd">HD</span>
-        </button>
-        <button class="flowzero-menu-item is-locked" data-quality="4k" title="Chất lượng 4K (Ultra) dành cho gói nâng cao">
-          <div class="flowzero-item-left">
-            <span class="flowzero-res-icon">4K</span>
-            <span class="flowzero-item-title">Siêu nét (4K)</span>
-          </div>
-          <span class="flowzero-badge badge-ultra">🔒 Ultra</span>
-        </button>
+        <button class="flowzero-menu-item" data-quality="1k">1K</button>
+        <button class="flowzero-menu-item" data-quality="2k">2K</button>
+        ${userFlowTier.includes("PAYGATE_TIER_") && !userFlowTier.includes("NOT_PAID") && !userFlowTier.includes("PAYGATE_TIER_ONE") ? `
+        <button class="flowzero-menu-item" data-quality="4k" title="4K">4K</button>
+        ` : `
+        <button class="flowzero-menu-item flowzero-hidden is-locked" data-quality="4k" title="4K (Khóa)">4K 🔒</button>
+        `}
       </div>
 
       <button class="flowzero-main-btn" title="Tải ảnh không có Watermark với FlowZero">
-        <svg class="flowzero-logo-icon" viewBox="0 0 24 24">
-          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-        </svg>
-        <span class="flowzero-label">FlowZero</span>
-        <span class="flowzero-chevron">▲</span>
+        <img class="flowzero-logo-icon" src="${chrome.runtime.getURL('assets/icon128.png')}" alt="FlowZero" />
       </button>
     `;
 
@@ -744,6 +688,7 @@
     });
 
     container.appendChild(wrapper);
+
   }
 
   // Scan Google Flow DOM for image elements / modal overlays
@@ -751,9 +696,6 @@
     if (!isExtensionEnabled) return;
 
     const selectors = [
-      "div[role='img']",
-      "img[src*='googleusercontent.com']",
-      "img[src*='labs.google']",
       ".tile-image-container",
       "[data-test-id='media-tile']",
       "[data-tile-id]"
@@ -762,7 +704,7 @@
     const elements = document.querySelectorAll(selectors.join(", "));
     elements.forEach((el) => {
       const container = el.tagName === "IMG" ? (el.parentElement || el) : el;
-      if (container && container.offsetWidth > 150 && container.offsetHeight > 150) {
+      if (container && container.offsetWidth > 80 && container.offsetHeight > 80) {
         injectButtonInto(container);
       }
     });
@@ -789,7 +731,7 @@
       const { dataUrl: preloadedDataUrl, url, filename } = event.data;
       if (!preloadedDataUrl && !url) return;
 
-      showToast("⚡ FlowZero: Đang tự động xóa watermark...", "info", 3500);
+      showToast("Đang tự động xóa watermark...", "info", 3500);
 
       try {
         const dataUrl = preloadedDataUrl || (await urlToDataUrl(url));
@@ -808,7 +750,7 @@
 
         if (response && response.success) {
           showToast(
-            response.cleaned ? "✓ FlowZero: Đã xóa watermark & lưu ảnh thành công!" : "✓ FlowZero: Đã tải hình ảnh thành công!",
+            response.cleaned ? "Đã xóa watermark & lưu ảnh thành công!" : "Đã tải hình ảnh thành công!",
             "success",
             3500
           );

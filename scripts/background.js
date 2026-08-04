@@ -75,13 +75,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         const finalDataUrl = offscreenResult.cleanDataUrl || inputDataUrl;
 
-        if (offscreenResult.cleaned) {
-          chrome.storage.local.get(["flowzero_cleaned_count"], (res) => {
-            const count = (res.flowzero_cleaned_count || 0) + 1;
-            chrome.storage.local.set({ flowzero_cleaned_count: count });
-          });
-        }
-
         if (message.action === "cleanWatermark") {
           sendResponse({
             success: true,

@@ -114,4 +114,43 @@
   }, true);
 
   console.log("[FlowZero] Main World Interceptor active with Blob protection.");
+
+  // Flow Tier Detection (Independent)
+  function emitTier(tier) {
+    if (!window.__flowZeroTierEmitted) {
+      window.__flowZeroTierEmitted = true;
+      console.log("[FlowZero] Detected Flow Tier:", tier);
+      window.postMessage({ type: "FLOWZERO_TIER_DETECTED", tier: tier }, "*");
+    }
+  }
+
+  // 1. Scan DOM for Next.js Initial State
+  setTimeout(() => {
+    try {
+      const nextData = document.getElementById("__NEXT_DATA__");
+      if (nextData && nextData.textContent) {
+        const match = nextData.textContent.match(/PAYGATE_TIER_[A-Z0-9_]+/i);
+        if (match) emitTier(match[0]);
+      }
+    } catch(e) {}
+  }, 1000);
+
+  // 2. Intercept Fetch API to catch projectInitialData, session, flowAppConfig, credits etc.
+  const _origFetch = window.fetch;
+  window.fetch = function(...args) {
+    const promise = _origFetch.apply(this, args);
+    promise.then((res) => {
+      try {
+        const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '');
+        if (url.includes('/api/trpc/') || url.includes('/api/auth/') || url.includes('/v1/credits')) {
+          res.clone().text().then((text) => {
+            const match = text.match(/PAYGATE_TIER_[A-Z0-9_]+/i);
+            if (match) emitTier(match[0]);
+          }).catch(() => {});
+        }
+      } catch (e) {}
+    }).catch(() => {});
+    return promise;
+  };
+
 })();
