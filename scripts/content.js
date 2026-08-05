@@ -214,6 +214,32 @@
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
         text-shadow: 0 1px 3px rgba(0,0,0,0.2);
         animation: flowzero-toast-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        min-width: 260px;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .flowzero-toast-content {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+      }
+
+      .flowzero-toast-bar {
+        width: 100%;
+        height: 4px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 2px;
+        margin-top: 6px;
+        overflow: hidden;
+      }
+
+      .flowzero-toast-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #a855f7, #ec4899);
+        border-radius: 2px;
+        transition: width 0.2s ease;
       }
 
       @keyframes flowzero-toast-in {
@@ -224,32 +250,53 @@
     document.head.appendChild(style);
   }
 
-  // Show Toast Notification
-  function showToast(message, type = "info", duration = 3200) {
-    const existing = document.querySelector(".flowzero-toast");
-    if (existing) existing.remove();
+  let toastHideTimer = null;
 
-    const toast = document.createElement("div");
-    toast.className = "flowzero-toast";
+  // Show Toast Notification with optional Progress Bar
+  function showToast(message, type = "info", duration = 3200, percent = null) {
+    let toast = document.querySelector(".flowzero-toast");
+    if (!toast) {
+      toast = document.createElement("div");
+      toast.className = "flowzero-toast";
+      document.body.appendChild(toast);
+    }
+
+    if (toastHideTimer) {
+      clearTimeout(toastHideTimer);
+      toastHideTimer = null;
+    }
+
+    toast.style.opacity = "1";
+    toast.style.transform = "translateY(0)";
 
     const iconColor = type === "success" ? "#22c55e" : type === "error" ? "#ef4444" : type === "warning" ? "#f59e0b" : "#a855f7";
+    const progressBar = typeof percent === "number" ? `
+      <div class="flowzero-toast-bar">
+        <div class="flowzero-toast-fill" style="width: ${Math.min(100, Math.max(0, percent))}%"></div>
+      </div>
+    ` : "";
+
     toast.innerHTML = `
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${iconColor}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        ${type === "success" ? '<polyline points="20 6 9 17 4 12"></polyline>' :
-          type === "error" ? '<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line>' :
-          type === "warning" ? '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>' :
-          '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>'}
-      </svg>
-      <span>${message}</span>
+      <div class="flowzero-toast-content">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${iconColor}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          ${type === "success" ? '<polyline points="20 6 9 17 4 12"></polyline>' :
+            type === "error" ? '<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line>' :
+            type === "warning" ? '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>' :
+            '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>'}
+        </svg>
+        <span>${message}</span>
+      </div>
+      ${progressBar}
     `;
 
-    document.body.appendChild(toast);
-    setTimeout(() => {
-      toast.style.transition = "opacity 0.3s ease, transform 0.3s ease";
-      toast.style.opacity = "0";
-      toast.style.transform = "translateY(10px)";
-      setTimeout(() => toast.remove(), 300);
-    }, duration);
+    if (duration > 0) {
+      toastHideTimer = setTimeout(() => {
+        toast.style.transition = "opacity 0.3s ease, transform 0.3s ease";
+        toast.style.opacity = "0";
+        toast.style.transform = "translateY(10px)";
+        setTimeout(() => toast.remove(), 300);
+      }, duration);
+    }
   }
 
   // Split Google CDN size suffix (=s..., =w..., =...)
@@ -300,10 +347,21 @@
       return nearbyDownload.href;
     }
 
-    if (container.tagName === "IMG" && container.src) {
+    let curr = container;
+    let video = null;
+    let depth = 4;
+    while (curr && curr !== document.body && depth > 0) {
+      video = curr.querySelector("video");
+      if (video) break;
+      curr = curr.parentElement;
+      depth--;
+    }
+    if (video) return video.currentSrc || video.src;
+
+    if (container.tagName === "IMG" && container.src && !container.classList.contains("flowzero-logo-icon")) {
       return container.currentSrc || container.src;
     }
-    const img = container.querySelector("img");
+    const img = Array.from(container.querySelectorAll("img")).find(i => !i.classList.contains("flowzero-logo-icon"));
     if (img) return img.currentSrc || img.src;
 
     const bgImage = window.getComputedStyle(container).backgroundImage;
@@ -496,8 +554,19 @@
     }
 
     if (!targetSubItem) {
-      console.warn(`[FlowZero] Submenu item for ${resUpper} not found. Available:`, Array.from(subItems).map(i => i.textContent?.trim()));
-      return false;
+      if (window._flowZeroPendingVideo) {
+        for (const item of subItems) {
+          const t = item.textContent?.toLowerCase() || "";
+          if (t.includes("tải") || t.includes("download") || t.includes("lưu") || t.includes("save")) {
+            targetSubItem = item;
+            break;
+          }
+        }
+      }
+      if (!targetSubItem) {
+        console.warn(`[FlowZero] Submenu item for ${resUpper} not found. Available:`, Array.from(subItems).map(i => i.textContent?.trim()));
+        return false;
+      }
     }
 
     // 7. Click target resolution item to trigger native Flow upscale & download!
@@ -526,29 +595,40 @@
     if (labelSpan) labelSpan.textContent = `Xóa WM (${resKey.toUpperCase()})...`;
 
     try {
-      // If 2K or 4K, attempt native Flow upscale automation first
-      if (resKey === "2k" || resKey === "4k") {
+      const isVideoBtn = resKey === "720p" || resKey === "1080p";
+      const isVideo = isVideoBtn || (rawUrl && rawUrl.includes(".mp4"));
+
+      // If high-res requested, attempt native Flow upscale automation first
+      if (resKey === "2k" || resKey === "4k" || resKey === "1080p" || resKey === "720p") {
         showToast(`Đang yêu cầu Google Flow upscale ${resKey.toUpperCase()} & xóa watermark...`, "info", 4000);
+        if (isVideo) window._flowZeroPendingVideo = true;
         const menuTriggered = await triggerFlowNativeDownload(targetContainer, resKey);
         if (menuTriggered) {
           // Flow native download will trigger and interceptor.js will capture and clean it!
           setTimeout(() => {
             btn.classList.remove("is-loading");
             if (labelSpan) labelSpan.textContent = originalText;
+            window._flowZeroPendingVideo = false;
           }, 3000);
           return;
         }
+        window._flowZeroPendingVideo = false;
         console.log("[FlowZero] Menu automation skipped/fallback to direct stream...");
       }
 
-      const filename = `flowzero_${resKey}_${Date.now()}.png`;
-      const dataUrl = await urlToDataUrl(rawUrl, resKey);
-      if (!dataUrl) throw new Error("Không thể chuyển đổi dữ liệu hình ảnh");
+      const ext = isVideo ? "mp4" : "png";
+      const action = isVideo ? "removeVideoWatermarkAndDownload" : "removeWatermarkAndDownload";
+
+      const filename = `flowzero_${resKey}_${Date.now()}.${ext}`;
+      // For videos, don't attempt image resolution hacks unless we know it works, 
+      // but urlToDataUrl with "original" bypasses the image size suffixes.
+      const dataUrl = await urlToDataUrl(rawUrl, isVideo ? "original" : resKey);
+      if (!dataUrl) throw new Error("Không thể chuyển đổi dữ liệu");
 
       const response = await new Promise((resolve) => {
         chrome.runtime.sendMessage(
           {
-            action: "removeWatermarkAndDownload",
+            action: action,
             imageUrl: dataUrl,
             filename,
             resolution: resKey
@@ -639,14 +719,12 @@
     }
 
     wrapper.innerHTML = `
-      <div class="flowzero-dropdown-menu">
-        <button class="flowzero-menu-item" data-quality="1k">1K</button>
-        <button class="flowzero-menu-item" data-quality="2k">2K</button>
-        ${userFlowTier.includes("PAYGATE_TIER_") && !userFlowTier.includes("NOT_PAID") && !userFlowTier.includes("PAYGATE_TIER_ONE") ? `
-        <button class="flowzero-menu-item" data-quality="4k" title="4K">4K</button>
-        ` : `
-        <button class="flowzero-menu-item flowzero-hidden is-locked" data-quality="4k" title="4K (Khóa)">4K 🔒</button>
-        `}
+      <div class="flowzero-dropdown-menu" style="min-width: 110px;">
+        <button class="flowzero-menu-item" data-quality="1k">Ảnh 1K</button>
+        <button class="flowzero-menu-item" data-quality="2k">Ảnh 2K</button>
+        <div style="height: 1px; background: rgba(255,255,255,0.15); margin: 4px 8px;"></div>
+        <button class="flowzero-menu-item" data-quality="720p">Video 720p</button>
+        <button class="flowzero-menu-item" data-quality="1080p">Video 1080p</button>
       </div>
 
       <button class="flowzero-main-btn" title="Tải ảnh không có Watermark với FlowZero">
@@ -723,43 +801,77 @@
     }
   }
 
+  // Listen for video progress events from background/offscreen
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.target === "content" && message.action === "videoProgress") {
+      const { progress } = message;
+      if (progress) {
+        const pct = progress.percent || 0;
+        const phaseMsg = progress.phase === "finalizing"
+          ? "Đang đóng gói file MP4..."
+          : progress.phase === "audio"
+          ? "Đang đồng bộ âm thanh..."
+          : `Đang xóa watermark video (${pct}%)...`;
+        showToast(phaseMsg, "info", 0, pct);
+      }
+    }
+  });
+
   // Listen for intercepted downloads from main world script
   window.addEventListener("message", async (event) => {
     if (!isExtensionEnabled) return;
     if (event.source !== window || !event.data) return;
     if (event.data.type === "FLOWZERO_INTERCEPT_DOWNLOAD") {
-      const { dataUrl: preloadedDataUrl, url, filename } = event.data;
+      const { dataUrl: preloadedDataUrl, url, filename, mediaType } = event.data;
       if (!preloadedDataUrl && !url) return;
 
-      showToast("Đang tự động xóa watermark...", "info", 3500);
+      let isVideo = mediaType === "video" || (typeof filename === "string" && filename.toLowerCase().endsWith(".mp4"));
+      if (preloadedDataUrl && preloadedDataUrl.startsWith("data:video/")) isVideo = true;
+      if (preloadedDataUrl && preloadedDataUrl.startsWith("data:application/mp4")) isVideo = true;
+      if (window._flowZeroPendingVideo) isVideo = true;
+      window._flowZeroPendingVideo = false;
+
+      const taskId = "task_" + Date.now();
+
+      if (isVideo) {
+        showToast("Đang chuẩn bị xử lý video WebCodecs...", "info", 0, 5);
+      } else {
+        showToast("Đang tự động xóa watermark...", "info", 3500);
+      }
 
       try {
         const dataUrl = preloadedDataUrl || (await urlToDataUrl(url));
-        if (!dataUrl) throw new Error("Không thể chuyển đổi dữ liệu hình ảnh từ liên kết");
+        if (!dataUrl) throw new Error("Không thể chuyển đổi dữ liệu từ liên kết");
 
         const response = await new Promise((resolve) => {
           chrome.runtime.sendMessage(
             {
-              action: "removeWatermarkAndDownload",
-              imageUrl: dataUrl,
-              filename: filename || `flowzero_${Date.now()}.png`
+              action: isVideo ? "removeVideoWatermarkAndDownload" : "removeWatermarkAndDownload",
+              imageUrl: !isVideo ? dataUrl : undefined,
+              videoUrl: isVideo ? dataUrl : undefined,
+              mediaType: isVideo ? "video" : "image",
+              taskId,
+              filename: filename || (isVideo ? `flowzero_${Date.now()}.mp4` : `flowzero_${Date.now()}.png`)
             },
             (res) => resolve(res || { success: false })
           );
         });
 
         if (response && response.success) {
+          const statsMsg = response.stats ? ` (${response.stats.frames} frames, ${(response.stats.totalMs / 1000).toFixed(1)}s)` : "";
           showToast(
-            response.cleaned ? "Đã xóa watermark & lưu ảnh thành công!" : "Đã tải hình ảnh thành công!",
+            response.cleaned
+              ? `Đã xóa watermark & lưu ${isVideo ? "video" : "ảnh"} thành công!${statsMsg}`
+              : `Đã tải ${isVideo ? "video" : "ảnh"} thành công!`,
             "success",
-            3500
+            4000
           );
         } else {
-          showToast("Lỗi khi xóa watermark: " + (response?.error || "Không thành công"), "error");
+          showToast("Lỗi khi xóa watermark: " + (response?.error || "Không thành công"), "error", 4000);
         }
       } catch (err) {
         console.error("[FlowZero Content Message Error]:", err);
-        showToast("Lỗi xử lý tải ảnh: " + err.message, "error");
+        showToast("Lỗi xử lý tải: " + err.message, "error", 4000);
       }
     }
   });

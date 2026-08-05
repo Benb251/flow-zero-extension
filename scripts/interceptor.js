@@ -37,40 +37,105 @@
     
     const hasDownload = a.hasAttribute("download");
     const href = a.href || "";
-    const isImage = /\.(png|jpe?g|webp)(\?.*)?$/i.test(href) || 
+    const isMedia = /\.(png|jpe?g|webp|mp4|webm)(\?.*)?$/i.test(href) || 
                     href.startsWith("blob:") || 
                     href.includes("googleusercontent.com") || 
+                    href.includes("flow-content.google") || 
                     href.includes("labs.google");
 
-    return hasDownload || isImage;
+    return hasDownload || isMedia;
   }
 
   function handleIntercept(el) {
     const a = getAnchorElement(el);
     if (!a) return;
     const href = a.href;
-    const filename = a.getAttribute("download") || a.download || `flowzero_${Date.now()}.png`;
+    // Check if the <a> tag's ancestors contain video markers
+    const root = a.closest(".modal, [role='dialog'], .tile, [data-tile-id], [data-test-id='media-tile']") || a.parentElement?.parentElement?.parentElement || a;
+    let hasVideoMarker = false;
+    if (root && root !== document.body) {
+      if (root.querySelector("video") !== null) hasVideoMarker = true;
+      const txt = root.textContent.toLowerCase().normalize("NFC");
+      if (txt.includes("play_circle") || txt.includes("chuyển động") || txt.includes("motion") || txt.includes("video")) hasVideoMarker = true;
+      const icons = root.querySelectorAll("i");
+      for (const icon of icons) {
+        if (icon.textContent.toLowerCase().includes("play")) hasVideoMarker = true;
+      }
+      const svgs = root.querySelectorAll("svg");
+      for (const svg of svgs) {
+        const aria = (svg.getAttribute("aria-label") || "").toLowerCase().normalize("NFC");
+        if (aria.includes("play") || aria.includes("video") || aria.includes("motion")) hasVideoMarker = true;
+      }
+    }
 
-    console.log("[FlowZero Interceptor] Intercepted native download:", href);
+    const isVideo = /\.(mp4|webm)(\?.*)?$/i.test(href) || hasVideoMarker;
+    const defaultExt = isVideo ? ".mp4" : ".png";
+    const filename = a.getAttribute("download") || a.download || `flowzero_${Date.now()}${defaultExt}`;
+
+    console.log("[FlowZero Interceptor] Intercepted native download:", href, "isVideo:", isVideo);
 
     if (href.startsWith("blob:")) {
       pendingBlobUrls.add(href);
-    }
 
-    // Immediately initiate fetch in Main World before Google Flow attempts to revoke
-    fetch(href)
+      fetch(href)
+        .then(res => res.blob())
+        .then(blob => {
+          let isMp4 = false;
+          if (blob.type.startsWith("video/") || blob.type === "application/mp4") isMp4 = true;
+          
+          const processBlob = (finalIsVideo) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              window.postMessage({
+                type: "FLOWZERO_INTERCEPT_DOWNLOAD",
+                url: href,
+                dataUrl: reader.result,
+                filename: a.download || filename,
+                mediaType: finalIsVideo ? "video" : "image"
+              }, "*");
+            };
+            reader.readAsDataURL(blob);
+          };
+
+          if (!isMp4 && blob.size > 12) {
+            const slice = blob.slice(0, 12);
+            slice.arrayBuffer().then(buf => {
+              const bytes = new Uint8Array(buf);
+              if (bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) {
+                isMp4 = true;
+              }
+              processBlob(isVideo || isMp4);
+            }).catch(() => processBlob(isVideo));
+          } else {
+            processBlob(isVideo || isMp4);
+          }
+        })
+        .catch((err) => {
+          console.warn("[FlowZero Interceptor] Main world blob fetch warning:", err.message);
+          window.postMessage({
+            type: "FLOWZERO_INTERCEPT_DOWNLOAD",
+            url: href,
+            filename: filename,
+            mediaType: isVideo ? "video" : "image"
+          }, "*");
+        });
+    } else {
+      // For non-blob URLs, proceed with standard fetch
+      fetch(href)
       .then((res) => {
         if (!res.ok) throw new Error("HTTP " + res.status);
         return res.blob();
       })
       .then((blob) => {
+        const isBlobVideo = blob.type.startsWith("video/") || isVideo;
         const reader = new FileReader();
         reader.onloadend = () => {
           window.postMessage({
             type: "FLOWZERO_INTERCEPT_DOWNLOAD",
             dataUrl: reader.result,
             url: href,
-            filename: filename
+            filename: filename,
+            mediaType: isBlobVideo ? "video" : "image"
           }, "*");
         };
         reader.readAsDataURL(blob);
@@ -80,9 +145,10 @@
         window.postMessage({
           type: "FLOWZERO_INTERCEPT_DOWNLOAD",
           url: href,
-          filename: filename
+          filename: filename,
         }, "*");
       });
+    }
   }
 
   // Intercept programmatic .click() calls from Google Flow scripts (e.g. 1K/2K/4K menu downloads)
