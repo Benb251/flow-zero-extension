@@ -347,21 +347,16 @@
       return nearbyDownload.href;
     }
 
-    let curr = container;
-    let video = null;
-    let depth = 4;
-    while (curr && curr !== document.body && depth > 0) {
-      video = curr.querySelector("video");
-      if (video) break;
-      curr = curr.parentElement;
-      depth--;
-    }
+    // Strictly check for video within the specific container or its closest tile/modal.
+    // Do NOT traverse up and querySelector down broadly, as it will capture sibling videos in a grid!
+    const scope = container.closest(".modal, [role='dialog'], .tile, [data-tile-id], [data-test-id='media-tile']") || container;
+    const video = scope.querySelector("video");
     if (video) return video.currentSrc || video.src;
 
     if (container.tagName === "IMG" && container.src && !container.classList.contains("flowzero-logo-icon")) {
       return container.currentSrc || container.src;
     }
-    const img = Array.from(container.querySelectorAll("img")).find(i => !i.classList.contains("flowzero-logo-icon"));
+    const img = Array.from(scope.querySelectorAll("img")).find(i => !i.classList.contains("flowzero-logo-icon"));
     if (img) return img.currentSrc || img.src;
 
     const bgImage = window.getComputedStyle(container).backgroundImage;

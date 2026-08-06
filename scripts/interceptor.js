@@ -55,16 +55,19 @@
     let hasVideoMarker = false;
     if (root && root !== document.body) {
       if (root.querySelector("video") !== null) hasVideoMarker = true;
-      const txt = root.textContent.toLowerCase().normalize("NFC");
-      if (txt.includes("play_circle") || txt.includes("chuyển động") || txt.includes("motion") || txt.includes("video")) hasVideoMarker = true;
-      const icons = root.querySelectorAll("i");
+      
+      // Do not use root.textContent for video detection! It will falsely match images where the prompt contains the word "video" or "motion".
+      // Instead, strictly check UI icons.
+      const icons = root.querySelectorAll("i, span.material-symbols-outlined, span.material-icons");
       for (const icon of icons) {
-        if (icon.textContent.toLowerCase().includes("play")) hasVideoMarker = true;
+        const iconTxt = icon.textContent.toLowerCase().normalize("NFC").trim();
+        if (iconTxt === "play_circle" || iconTxt === "play_arrow") hasVideoMarker = true;
       }
+      
       const svgs = root.querySelectorAll("svg");
       for (const svg of svgs) {
         const aria = (svg.getAttribute("aria-label") || "").toLowerCase().normalize("NFC");
-        if (aria.includes("play") || aria.includes("video") || aria.includes("motion")) hasVideoMarker = true;
+        if (aria === "play" || aria === "play video") hasVideoMarker = true;
       }
     }
 
