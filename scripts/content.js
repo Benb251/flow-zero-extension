@@ -819,11 +819,22 @@
 
   // Listen for intercepted downloads from main world script
   window.addEventListener("message", async (event) => {
-    if (!isExtensionEnabled) return;
     if (event.source !== window || !event.data) return;
     if (event.data.type === "FLOWZERO_INTERCEPT_DOWNLOAD") {
       const { dataUrl: preloadedDataUrl, url, filename, mediaType } = event.data;
       if (!preloadedDataUrl && !url) return;
+
+      if (!isExtensionEnabled) {
+        // Just download directly without processing
+        const a = document.createElement("a");
+        a.href = url || preloadedDataUrl;
+        a.download = filename || "download";
+        a.setAttribute("data-flowzero-passthrough", "true");
+        document.body.appendChild(a); // Needs to be in DOM for some browsers to allow click download
+        a.click();
+        document.body.removeChild(a);
+        return;
+      }
 
       let isVideo = mediaType === "video" || (typeof filename === "string" && filename.toLowerCase().endsWith(".mp4"));
       if (preloadedDataUrl && preloadedDataUrl.startsWith("data:video/")) isVideo = true;
