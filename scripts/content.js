@@ -16,8 +16,11 @@
   }
 
   // Startup state bootstrap at document_start: query storage and notify MAIN interceptor immediately
-  chrome.storage.local.get(["flowzero_enabled"], (res) => {
+  chrome.storage.local.get(["flowzero_enabled", "flowzero_detected_tier"], (res) => {
     isExtensionEnabled = res.flowzero_enabled !== false;
+    if (res.flowzero_detected_tier) {
+      userFlowTier = res.flowzero_detected_tier;
+    }
     forwardStateToInterceptor(isExtensionEnabled);
     if (document.readyState !== "loading") {
       updateButtonsVisibility();
@@ -43,6 +46,7 @@
 
     if (event.data.type === "FLOWZERO_TIER_DETECTED" && typeof event.data.tier === "string") {
       userFlowTier = event.data.tier;
+      console.log("[FlowZero] Content received tier:", userFlowTier);
       chrome.storage.local.set({ flowzero_detected_tier: userFlowTier });
       updateButtonsVisibility();
       return;
@@ -201,45 +205,75 @@
       }
 
       .flowzero-dropdown-menu {
-        display: none;
-        flex-direction: column;
-        background: rgba(15, 23, 42, 0.92);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 10px;
+        position: absolute;
+        bottom: calc(100% + 8px);
+        right: 0;
+        width: 60px;
+        background: rgba(255, 255, 255, 0.15);
+        backdrop-filter: blur(24px) saturate(1.5);
+        -webkit-backdrop-filter: blur(24px) saturate(1.5);
+        border: none;
+        border-radius: 12px;
         padding: 6px;
-        margin-bottom: 8px;
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
-        animation: flowzero-menu-pop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(6px) scale(0.96);
+        transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.2s;
+        pointer-events: none;
+        display: flex;
+        flex-direction: column;
       }
 
-      .${WRAPPER_CLASS}.is-hovered .flowzero-dropdown-menu {
-        display: flex;
+      .flowzero-dropdown-menu::after {
+        content: "";
+        position: absolute;
+        bottom: -16px;
+        left: 0;
+        right: 0;
+        height: 20px;
+        background: transparent;
+        pointer-events: auto;
+      }
+
+      .${WRAPPER_CLASS}:hover .flowzero-dropdown-menu,
+      .${WRAPPER_CLASS}.is-hovered .flowzero-dropdown-menu,
+      .flowzero-dropdown-menu:hover {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0) scale(1);
+        pointer-events: auto;
       }
 
       .flowzero-menu-item {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        padding: 8px 4px;
         background: transparent;
         border: none;
-        color: #e2e8f0;
-        padding: 6px 12px;
-        text-align: left;
-        font-size: 12px;
-        font-weight: 500;
-        border-radius: 6px;
+        border-radius: 8px;
+        color: #ffffff;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 13px;
+        font-weight: 800;
         cursor: pointer;
+        text-align: center;
+        transition: all 0.2s ease;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.2);
         white-space: nowrap;
-        transition: background 0.15s ease, color 0.15s ease;
       }
 
       .flowzero-menu-item:hover {
-        background: rgba(168, 85, 247, 0.25);
+        background: rgba(255, 255, 255, 0.25);
         color: #ffffff;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
       }
 
-      @keyframes flowzero-menu-pop {
-        from { opacity: 0; transform: translateY(6px) scale(0.95); }
-        to { opacity: 1; transform: translateY(0) scale(1); }
+      .flowzero-menu-item:active {
+        transform: scale(0.95);
+        background: rgba(255, 255, 255, 0.35);
       }
 
       .flowzero-toast {
@@ -673,11 +707,23 @@
 
   function updateButtonsVisibility() {
     const wrappers = document.querySelectorAll(`.${WRAPPER_CLASS}`);
-    const isUltra = userFlowTier.includes("PAYGATE_TIER_") && !userFlowTier.includes("NOT_PAID") && !userFlowTier.includes("PAYGATE_TIER_ONE");
+    const isUltra = userFlowTier.includes("PAYGATE_TIER_") && 
+                    !userFlowTier.includes("NOT_PAID") && 
+                    !userFlowTier.includes("PAYGATE_TIER_ONE");
+
+    console.log("[FlowZero] Content received tier:", userFlowTier);
+    console.log("[FlowZero] 4K visibility:", isUltra ? "VISIBLE" : "HIDDEN");
+
     wrappers.forEach((w) => {
       w.classList.toggle("flowzero-hidden", !isExtensionEnabled);
       const btn4k = w.querySelector('.flowzero-menu-item[data-quality="4k"]');
-      if (btn4k) btn4k.classList.toggle("flowzero-hidden", !isUltra);
+      if (btn4k) {
+        if (isUltra) {
+          btn4k.classList.remove("flowzero-hidden");
+        } else {
+          btn4k.classList.add("flowzero-hidden");
+        }
+      }
     });
   }
 
@@ -696,11 +742,12 @@
         <button class="flowzero-menu-item" data-quality="1k">1K</button>
         <button class="flowzero-menu-item" data-quality="2k">2K</button>
         <button class="flowzero-menu-item" data-quality="4k">4K</button>
+        <div style="height: 1px; background: rgba(255,255,255,0.2); margin: 4px 2px;"></div>
         <button class="flowzero-menu-item" data-quality="720p">720p</button>
         <button class="flowzero-menu-item" data-quality="1080p">1080p</button>
       </div>
-      <button class="flowzero-main-btn">
-        <img class="flowzero-logo-icon" src="${chrome.runtime.getURL('assets/icon128.png')}" />
+      <button class="flowzero-main-btn" title="Tải hình ảnh/video không watermark">
+        <img class="flowzero-logo-icon" src="${chrome.runtime.getURL('assets/icon128.png')}" alt="FlowZero" />
       </button>
     `;
 
@@ -714,6 +761,8 @@
     wrapper.addEventListener("mouseenter", () => { if(hoverTimer) clearTimeout(hoverTimer); wrapper.classList.add("is-hovered"); });
     wrapper.addEventListener("mouseleave", () => { hoverTimer = setTimeout(() => wrapper.classList.remove("is-hovered"), 350); });
     container.appendChild(wrapper);
+
+    updateButtonsVisibility();
   }
 
   function scanAndInject() {
