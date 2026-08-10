@@ -149,34 +149,43 @@
             mediaType: isVideo ? "video" : "image"
           }, targetOrigin);
         });
+    } else if (isVideo) {
+      // For trusted HTTP(S) video, send URL directly without prefetching or Base64 encoding in MAIN world
+      window.postMessage({
+        type: "FLOWZERO_INTERCEPT_DOWNLOAD",
+        url: href,
+        filename: filename,
+        mediaType: "video"
+      }, targetOrigin);
     } else {
+      // For images, preload DataURL for canvas processing
       fetch(href)
-      .then((res) => {
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        return res.blob();
-      })
-      .then((blob) => {
-        const isBlobVideo = blob.type.startsWith("video/") || isVideo;
-        const reader = new FileReader();
-        reader.onloadend = () => {
+        .then((res) => {
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.blob();
+        })
+        .then((blob) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            window.postMessage({
+              type: "FLOWZERO_INTERCEPT_DOWNLOAD",
+              dataUrl: reader.result,
+              url: href,
+              filename: filename,
+              mediaType: "image"
+            }, targetOrigin);
+          };
+          reader.readAsDataURL(blob);
+        })
+        .catch((err) => {
+          console.warn("[FlowZero Interceptor] Main world fetch warning:", err.message);
           window.postMessage({
             type: "FLOWZERO_INTERCEPT_DOWNLOAD",
-            dataUrl: reader.result,
             url: href,
             filename: filename,
-            mediaType: isBlobVideo ? "video" : "image"
+            mediaType: "image"
           }, targetOrigin);
-        };
-        reader.readAsDataURL(blob);
-      })
-      .catch((err) => {
-        console.warn("[FlowZero Interceptor] Main world blob fetch warning:", err.message);
-        window.postMessage({
-          type: "FLOWZERO_INTERCEPT_DOWNLOAD",
-          url: href,
-          filename: filename,
-        }, targetOrigin);
-      });
+        });
     }
   }
 

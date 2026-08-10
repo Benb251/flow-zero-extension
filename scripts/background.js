@@ -150,8 +150,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         // Trigger Chrome Download
         const defaultExt = isVideoAction ? ".mp4" : ".png";
-        let safeFilename = filename || `flowzero_${Date.now()}${defaultExt}`;
-        const sanitizedFilename = safeFilename.replace(/[\\/:*?"<>|]/g, "_");
+        const sanitizedFilename = sanitizeFilename(filename, defaultExt);
 
         const downloadId = await chrome.downloads.download({
           url: finalDataUrl,
@@ -194,27 +193,40 @@ chrome.downloads.onCreated.addListener(async (item) => {
     (async () => {
       try {
         await ensureOffscreenDocument();
-        const res = await fetch(item.url);
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const blob = await res.blob();
-        const dataUrl = await blobToDataUrl(blob);
-        
-        let isVideo = (item.filename && item.filename.toLowerCase().endsWith(".mp4")) || blob.type.startsWith("video/");
+        const isVideo = detectMediaType(item.url, item.filename) === "video";
 
-        console.log("[FlowZero Background] Forwarding intercepted download to Offscreen:", item.filename, "Video:", isVideo);
+        console.log("[FlowZero Background] Forwarding intercepted native download to Offscreen:", item.filename, "Video:", isVideo);
 
-        const offscreenResult = await chrome.runtime.sendMessage({
-          target: "offscreen",
-          action: isVideo ? "processVideoWatermark" : "processWatermark",
-          dataUrl: dataUrl,
-          sourceUrl: item.url,
-          mime: blob.type,
-          taskId: "background_intercept_" + Date.now()
-        });
+        let offscreenResult = null;
+
+        if (isVideo) {
+          // Direct HTTP(S) video branch: pass sourceUrl directly to Offscreen without pre-fetching or Base64 encoding!
+          offscreenResult = await chrome.runtime.sendMessage({
+            target: "offscreen",
+            action: "processVideoWatermark",
+            sourceUrl: item.url,
+            taskId: "background_intercept_" + Date.now()
+          });
+        } else {
+          // Image branch: fetch and convert to DataURL for canvas processing
+          const res = await fetch(item.url);
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const blob = await res.blob();
+          const dataUrl = await blobToDataUrl(blob);
+
+          offscreenResult = await chrome.runtime.sendMessage({
+            target: "offscreen",
+            action: "processWatermark",
+            dataUrl: dataUrl,
+            sourceUrl: item.url,
+            mime: blob.type,
+            taskId: "background_intercept_" + Date.now()
+          });
+        }
 
         if (offscreenResult && offscreenResult.success && offscreenResult.cleanDataUrl) {
           const defaultExt = isVideo ? ".mp4" : ".png";
-          let safeFilename = item.filename || `flowzero_intercepted${defaultExt}`;
+          const safeFilename = sanitizeFilename(item.filename, defaultExt);
           
           chrome.downloads.download({
             url: offscreenResult.cleanDataUrl,

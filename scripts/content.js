@@ -580,14 +580,29 @@
 
       const ext = isVideo ? "mp4" : "png";
       const filename = `flowzero_${resKey}_${Date.now()}.${ext}`;
-      const dataUrl = await urlToDataUrl(rawUrl, isVideo ? "original" : resKey);
       
+      let dataUrl = undefined;
+      let mediaUrl = undefined;
+
+      if (isVideo) {
+        if (rawUrl.startsWith("blob:")) {
+          dataUrl = await urlToDataUrl(rawUrl, "original");
+          mediaUrl = rawUrl;
+        } else {
+          mediaUrl = rawUrl;
+        }
+      } else {
+        dataUrl = await urlToDataUrl(rawUrl, resKey);
+        mediaUrl = rawUrl;
+      }
+
       const response = await new Promise((resolve) => {
         chrome.runtime.sendMessage(
           {
             action: isVideo ? "removeVideoWatermarkAndDownload" : "removeWatermarkAndDownload",
             imageUrl: !isVideo ? dataUrl : undefined,
             videoUrl: isVideo ? dataUrl : undefined,
+            mediaUrl: mediaUrl,
             filename,
             resolution: resKey
           },
