@@ -468,6 +468,8 @@
 
   async function triggerFlowNativeDownload(container, resolution = "2k") {
     const resUpper = resolution.toUpperCase();
+    console.log("[FlowZero] Requested native resolution:", resUpper);
+
     const imgEl = container.querySelector("img") || container.querySelector("video") || container;
     if (!imgEl) return false;
 
@@ -499,7 +501,10 @@
       if (contextMenu) break;
     }
 
-    if (!contextMenu) return false;
+    if (!contextMenu) {
+      console.warn("[FlowZero] Context menu did not appear.");
+      return false;
+    }
     await sleep(100);
 
     const menuItems = contextMenu.querySelectorAll('[role="menuitem"], button, div[tabindex]');
@@ -513,7 +518,10 @@
       }
     }
 
-    if (!downloadItem) return false;
+    if (!downloadItem) {
+      console.warn("[FlowZero] Download menu item not found in context menu.");
+      return false;
+    }
 
     const dlRect = downloadItem.getBoundingClientRect();
     const dlCx = dlRect.left + dlRect.width / 2;
@@ -522,10 +530,10 @@
     const pointerOpts = { bubbles: true, cancelable: true, clientX: dlCx, clientY: dlCy, pointerId: 1, pointerType: "mouse" };
     downloadItem.dispatchEvent(new PointerEvent("pointerover", pointerOpts));
     downloadItem.dispatchEvent(new PointerEvent("pointerenter", pointerOpts));
+    downloadItem.dispatchEvent(new PointerEvent("pointermove", pointerOpts));
     downloadItem.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, clientX: dlCx, clientY: dlCy }));
     downloadItem.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true, clientX: dlCx, clientY: dlCy }));
-    await sleep(120);
-    downloadItem.click();
+    downloadItem.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: dlCx, clientY: dlCy }));
 
     let subMenu = null;
     for (let i = 0; i < 15; i++) {
@@ -540,20 +548,58 @@
       if (subMenu) break;
     }
 
-    if (!subMenu) return false;
+    if (!subMenu) {
+      downloadItem.dispatchEvent(new FocusEvent("focus", { bubbles: true }));
+      downloadItem.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }));
+      await sleep(150);
+      const allMenus = document.querySelectorAll('[role="menu"], [data-radix-menu-content], .submenu');
+      for (const m of allMenus) {
+        if (m !== contextMenu && m.offsetWidth > 0 && m.offsetHeight > 0) {
+          subMenu = m;
+          break;
+        }
+      }
+    }
+
+    if (!subMenu) {
+      console.warn("[FlowZero] Resolution submenu not found.");
+      return false;
+    }
+
+    console.log("[FlowZero] Resolution submenu found");
     await sleep(150);
 
     const subItems = subMenu.querySelectorAll('[role="menuitem"], button, div[tabindex]');
     let targetSubItem = null;
+
     for (const item of subItems) {
-      const text = item.textContent?.trim() || "";
-      if (text.toUpperCase().includes(resUpper)) {
+      const rawText = item.textContent || "";
+      const normalized = rawText.replace(/\s+/g, " ").trim().toUpperCase();
+
+      if (
+        normalized === resUpper ||
+        normalized.startsWith(resUpper + " ") ||
+        normalized.startsWith(resUpper + "\N") ||
+        normalized.includes(` ${resUpper}`) ||
+        new RegExp(`\\b${resUpper}\\b`, "i").test(normalized)
+      ) {
+        if (item.getAttribute("aria-disabled") === "true" || item.hasAttribute("disabled")) {
+          console.warn(`[FlowZero] Option ${resUpper} is disabled in Flow.`);
+          showToast(`Tùy chọn ${resUpper} không khả dụng cho tài khoản hiện tại`, "warning", 3500);
+          return false;
+        }
         targetSubItem = item;
         break;
       }
     }
 
-    if (!targetSubItem) return false;
+    if (!targetSubItem) {
+      console.warn(`[FlowZero] Submenu item for ${resUpper} not found. Available items:`, Array.from(subItems).map(i => i.textContent?.replace(/\s+/g, " ").trim()));
+      return false;
+    }
+
+    const clickedText = targetSubItem.textContent?.replace(/\s+/g, " ").trim().toUpperCase();
+    console.log("[FlowZero] Clicking native resolution:", clickedText);
     targetSubItem.click();
     return true;
   }
