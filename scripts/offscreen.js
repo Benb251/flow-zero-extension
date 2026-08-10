@@ -96,7 +96,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "processVideoWatermark") {
     (async () => {
       try {
-        const { dataUrl, taskId } = message;
+        const { dataUrl, taskId, originTabId } = message;
         if (!dataUrl) {
           sendResponse({ success: false, error: "No video dataUrl provided" });
           return;
@@ -112,11 +112,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         const result = await remover.process(inputBlob, {
           onProgress: (progress) => {
-            // Forward progress updates to background / content script
+            // Forward progress updates with originTabId to background service worker
             chrome.runtime.sendMessage({
               target: "content",
               action: "videoProgress",
               taskId,
+              originTabId,
               progress,
             }).catch(() => {});
           },

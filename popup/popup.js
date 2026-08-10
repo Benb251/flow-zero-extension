@@ -6,6 +6,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   const toggleEnabled = document.getElementById("toggleEnabled");
   const statusBadge = document.getElementById("statusBadge");
   const detectedTier = document.getElementById("detectedTier");
+  const appVersion = document.getElementById("appVersion");
+
+  if (appVersion && chrome.runtime?.getManifest) {
+    appVersion.textContent = `v${chrome.runtime.getManifest().version}`;
+  }
 
   // Load state from chrome.storage
   chrome.storage.local.get(["flowzero_enabled", "flowzero_detected_tier"], (res) => {

@@ -8,12 +8,39 @@
   if (window.__flowZeroInterceptorInjected) return;
   window.__flowZeroInterceptorInjected = true;
 
+  // Extension active state in MAIN world (defaults to false / passive until isolated content script notifies)
+  let flowZeroEnabled = false;
+
   const NATIVE_CLICK = HTMLElement.prototype.click;
   const NATIVE_REVOKE = URL.revokeObjectURL;
+  const NATIVE_FETCH = window.fetch;
   const pendingBlobUrls = new Set();
 
-  // Override URL.revokeObjectURL to delay revocation of intercepted download blobs
+  const getTargetOrigin = () => {
+    try {
+      return window.location.origin && window.location.origin !== "null" ? window.location.origin : "*";
+    } catch (_) {
+      return "*";
+    }
+  };
+
+  // Listen for extension state updates from isolated content script
+  window.addEventListener("message", (event) => {
+    if (event.source !== window) return;
+    const targetOrigin = getTargetOrigin();
+    if (targetOrigin !== "*" && event.origin !== targetOrigin) return;
+
+    if (event.data && event.data.type === "FLOWZERO_STATE_CHANGE") {
+      flowZeroEnabled = event.data.enabled === true;
+      console.log("[FlowZero Interceptor] State updated in MAIN world:", flowZeroEnabled ? "ENABLED" : "DISABLED");
+    }
+  });
+
+  // Override URL.revokeObjectURL to delay revocation of intercepted download blobs when enabled
   URL.revokeObjectURL = function(url) {
+    if (!flowZeroEnabled) {
+      return NATIVE_REVOKE.apply(this, arguments);
+    }
     if (typeof url === "string" && pendingBlobUrls.has(url)) {
       setTimeout(() => {
         pendingBlobUrls.delete(url);
@@ -31,6 +58,7 @@
   }
 
   function isDownloadAnchor(el) {
+    if (!flowZeroEnabled) return false;
     const a = getAnchorElement(el);
     if (!a || !(a instanceof HTMLAnchorElement)) return false;
     if (a.hasAttribute("data-flowzero-passthrough")) return false;
@@ -47,17 +75,15 @@
   }
 
   function handleIntercept(el) {
+    if (!flowZeroEnabled) return;
     const a = getAnchorElement(el);
     if (!a) return;
     const href = a.href;
-    // Check if the <a> tag's ancestors contain video markers
     const root = a.closest(".modal, [role='dialog'], .tile, [data-tile-id], [data-test-id='media-tile']") || a.parentElement?.parentElement?.parentElement || a;
     let hasVideoMarker = false;
     if (root && root !== document.body) {
       if (root.querySelector("video") !== null) hasVideoMarker = true;
       
-      // Do not use root.textContent for video detection! It will falsely match images where the prompt contains the word "video" or "motion".
-      // Instead, strictly check UI icons.
       const icons = root.querySelectorAll("i, span.material-symbols-outlined, span.material-icons");
       for (const icon of icons) {
         const iconTxt = icon.textContent.toLowerCase().normalize("NFC").trim();
@@ -76,6 +102,7 @@
     const filename = a.getAttribute("download") || a.download || `flowzero_${Date.now()}${defaultExt}`;
 
     console.log("[FlowZero Interceptor] Intercepted native download:", href, "isVideo:", isVideo);
+    const targetOrigin = getTargetOrigin();
 
     if (href.startsWith("blob:")) {
       pendingBlobUrls.add(href);
@@ -95,7 +122,7 @@
                 dataUrl: reader.result,
                 filename: a.download || filename,
                 mediaType: finalIsVideo ? "video" : "image"
-              }, "*");
+              }, targetOrigin);
             };
             reader.readAsDataURL(blob);
           };
@@ -120,10 +147,9 @@
             url: href,
             filename: filename,
             mediaType: isVideo ? "video" : "image"
-          }, "*");
+          }, targetOrigin);
         });
     } else {
-      // For non-blob URLs, proceed with standard fetch
       fetch(href)
       .then((res) => {
         if (!res.ok) throw new Error("HTTP " + res.status);
@@ -139,7 +165,7 @@
             url: href,
             filename: filename,
             mediaType: isBlobVideo ? "video" : "image"
-          }, "*");
+          }, targetOrigin);
         };
         reader.readAsDataURL(blob);
       })
@@ -149,26 +175,29 @@
           type: "FLOWZERO_INTERCEPT_DOWNLOAD",
           url: href,
           filename: filename,
-        }, "*");
+        }, targetOrigin);
       });
     }
   }
 
-  // Intercept programmatic .click() calls from Google Flow scripts (e.g. 1K/2K/4K menu downloads)
+  // Intercept programmatic .click() calls from Google Flow scripts when enabled
   HTMLElement.prototype.click = function() {
-    try {
-      if (isDownloadAnchor(this)) {
-        handleIntercept(this);
-        return; // Prevent original watermarked download
+    if (flowZeroEnabled) {
+      try {
+        if (isDownloadAnchor(this)) {
+          handleIntercept(this);
+          return;
+        }
+      } catch (err) {
+        console.warn("[FlowZero Interceptor Error]:", err);
       }
-    } catch (err) {
-      console.warn("[FlowZero Interceptor Error]:", err);
     }
     return NATIVE_CLICK.apply(this, arguments);
   };
 
-  // Intercept user click events on <a> elements in capture phase
+  // Intercept user click events on <a> elements in capture phase when enabled
   document.addEventListener("click", (e) => {
+    if (!flowZeroEnabled) return;
     try {
       const target = e.composedPath && e.composedPath()[0] || e.target;
       const a = target?.closest?.("a[download]");
@@ -182,18 +211,15 @@
     }
   }, true);
 
-  console.log("[FlowZero] Main World Interceptor active with Blob protection.");
-
-  // Flow Tier Detection (Independent)
+  // Flow Tier Detection
   function emitTier(tier) {
     if (!window.__flowZeroTierEmitted) {
       window.__flowZeroTierEmitted = true;
       console.log("[FlowZero] Detected Flow Tier:", tier);
-      window.postMessage({ type: "FLOWZERO_TIER_DETECTED", tier: tier }, "*");
+      window.postMessage({ type: "FLOWZERO_TIER_DETECTED", tier: tier }, getTargetOrigin());
     }
   }
 
-  // 1. Scan DOM for Next.js Initial State
   setTimeout(() => {
     try {
       const nextData = document.getElementById("__NEXT_DATA__");
@@ -204,10 +230,11 @@
     } catch(e) {}
   }, 1000);
 
-  // 2. Intercept Fetch API to catch projectInitialData, session, flowAppConfig, credits etc.
-  const _origFetch = window.fetch;
   window.fetch = function(...args) {
-    const promise = _origFetch.apply(this, args);
+    const promise = NATIVE_FETCH.apply(this, args);
+    if (!flowZeroEnabled) {
+      return promise;
+    }
     promise.then((res) => {
       try {
         const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '');
@@ -222,4 +249,5 @@
     return promise;
   };
 
+  console.log("[FlowZero] Main World Interceptor loaded (passive until state forwarded).");
 })();

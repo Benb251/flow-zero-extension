@@ -1,0 +1,17 @@
+{
+  "name": "flow-zero-extension",
+  "version": "1.2.1",
+  "description": "FlowZero Chrome Extension for Google Flow watermark removal",
+  "main": "scripts/background.js",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
+  "keywords": [
+    "chrome-extension",
+    "flowzero",
+    "watermark-remover"
+  ],
+  "author": "Benb251",
+  "license": "MIT"
+}

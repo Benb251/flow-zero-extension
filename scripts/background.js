@@ -4,18 +4,51 @@
  */
 
 const OFFSCREEN_DOCUMENT_PATH = "scripts/offscreen.html";
+let creatingOffscreenDocument = null;
 
-// Ensure Offscreen Document is active for media operations
+// Validate media URLs against explicit trusted Google Flow domains
+function isAllowedFlowMediaUrl(value) {
+  if (!value || typeof value !== "string") return false;
+  if (value.startsWith("data:")) return true;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return false;
+    const host = url.hostname.toLowerCase();
+    return (
+      host === "labs.google" ||
+      host === "flow-content.google" ||
+      host === "storage.googleapis.com" ||
+      host.endsWith(".googleusercontent.com")
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Ensure Offscreen Document is active for media operations (Chrome 116+ getContexts)
 async function ensureOffscreenDocument() {
-  if (await chrome.offscreen.hasDocument()) {
+  const offscreenUrl = chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH);
+  const contexts = await chrome.runtime.getContexts({
+    contextTypes: ["OFFSCREEN_DOCUMENT"],
+    documentUrls: [offscreenUrl]
+  });
+
+  if (contexts.length > 0) {
     return;
   }
-  const reason = (chrome.offscreen && chrome.offscreen.Reason && chrome.offscreen.Reason.BLOBS) || "BLOBS";
-  await chrome.offscreen.createDocument({
-    url: OFFSCREEN_DOCUMENT_PATH,
-    reasons: [reason],
-    justification: "FlowZero image and video watermark removal processing"
-  });
+
+  if (!creatingOffscreenDocument) {
+    const reason = (chrome.offscreen && chrome.offscreen.Reason && chrome.offscreen.Reason.BLOBS) || "BLOBS";
+    creatingOffscreenDocument = chrome.offscreen.createDocument({
+      url: OFFSCREEN_DOCUMENT_PATH,
+      reasons: [reason],
+      justification: "FlowZero image and video watermark removal processing"
+    }).finally(() => {
+      creatingOffscreenDocument = null;
+    });
+  }
+
+  await creatingOffscreenDocument;
 }
 
 // Convert fetched response/blob into DataURL inside Service Worker
@@ -35,13 +68,12 @@ async function blobToDataUrl(blob) {
 
 // Main message listener
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // Relay progress messages from offscreen to tabs
+  // Relay progress messages directly to originating tab using originTabId
   if (message.target === "content" && message.action === "videoProgress") {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs && tabs[0] && tabs[0].id) {
-        chrome.tabs.sendMessage(tabs[0].id, message).catch(() => {});
-      }
-    });
+    const originTabId = message.originTabId;
+    if (originTabId) {
+      chrome.tabs.sendMessage(originTabId, message).catch(() => {});
+    }
     return false;
   }
 
@@ -56,15 +88,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         const { imageUrl, videoUrl, mediaUrl, filename = "flowzero_clean.png", mime = "image/png", taskId } = message;
         const sourceUrl = mediaUrl || videoUrl || imageUrl;
+        const originTabId = sender.tab?.id;
 
         if (!sourceUrl) {
           sendResponse({ success: false, error: "Missing source media URL" });
           return;
         }
 
+        if (!isAllowedFlowMediaUrl(sourceUrl)) {
+          sendResponse({ success: false, error: "Disallowed target media URL domain" });
+          return;
+        }
+
         let inputDataUrl = sourceUrl;
 
-        // If URL is an external link / blob URL, fetch it in background
+        // If URL is an external link / blob URL, fetch it in background if needed
         if (!sourceUrl.startsWith("data:")) {
           try {
             const resp = await fetch(sourceUrl, { cache: "no-store" });
@@ -74,7 +112,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               if (blob.type.startsWith("video/") || blob.type === "application/mp4") {
                 isMp4 = true;
               } else if (blob.size > 12) {
-                // Check magic bytes for MP4 (ftyp)
                 const slice = blob.slice(0, 12);
                 const buf = await slice.arrayBuffer();
                 const bytes = new Uint8Array(buf);
@@ -91,12 +128,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             console.warn("[FlowZero Background] Fetch fallback warning:", e.message);
           }
         } else {
-          // It's a data URL, we can extract the mime type
           const match = sourceUrl.match(/^data:([^;]+);/);
           if (match && (match[1].startsWith("video/") || match[1] === "application/mp4")) {
             isVideoAction = true;
           } else {
-            // Check magic bytes from base64
             const b64Data = sourceUrl.split(",")[1];
             if (b64Data) {
               const b64Prefix = b64Data.substring(0, 30);
@@ -117,20 +152,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         let offscreenResult = null;
 
         if (isVideoAction) {
-          // Process Video via WebCodecs
           offscreenResult = await chrome.runtime.sendMessage({
             target: "offscreen",
             action: "processVideoWatermark",
             dataUrl: inputDataUrl,
-            taskId
+            sourceUrl: sourceUrl,
+            taskId,
+            originTabId
           });
         } else {
-          // Process Image via Canvas
           offscreenResult = await chrome.runtime.sendMessage({
             target: "offscreen",
             action: "processWatermark",
             dataUrl: inputDataUrl,
-            mime
+            mime,
+            originTabId
           });
         }
 
@@ -175,15 +211,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     })();
 
-    return true; // Keep channel open for async response
+    return true;
   }
 });
 
-// Ultimate Fallback: Intercept native downloads at the browser level
-chrome.downloads.onCreated.addListener((item) => {
+// Intercept native downloads at the browser level when extension is ENABLED
+chrome.downloads.onCreated.addListener(async (item) => {
+  const state = await chrome.storage.local.get(["flowzero_enabled"]);
+  if (state.flowzero_enabled === false) return; // Truly passive when disabled
+
   if (item.url.startsWith("data:") || item.url.startsWith("blob:") || item.url.startsWith("chrome-extension:")) return;
 
-  if (item.url.includes("flow-content.google") || item.url.includes("labs.google/fx/api/trpc/media")) {
+  if (isAllowedFlowMediaUrl(item.url)) {
     console.log("[FlowZero Background] Intercepted native download:", item.url);
     
     // Cancel the native watermarked download immediately
@@ -206,6 +245,7 @@ chrome.downloads.onCreated.addListener((item) => {
           target: "offscreen",
           action: isVideo ? "processVideoWatermark" : "processWatermark",
           dataUrl: dataUrl,
+          sourceUrl: item.url,
           mime: blob.type,
           taskId: "background_intercept_" + Date.now()
         });
@@ -230,5 +270,7 @@ chrome.downloads.onCreated.addListener((item) => {
 // Extension installation setup
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.set({ flowzero_enabled: true });
-  console.log("[FlowZero] Extension v1.2.0 installed and ready (Image + Video support).");
+  const ver = chrome.runtime.getManifest().version;
+  console.log(`[FlowZero] Extension v${ver} installed and ready.`);
 });
+
