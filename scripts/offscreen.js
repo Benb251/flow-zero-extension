@@ -158,7 +158,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({
             success: true,
             cleaned: false,
-            cleanDataUrl: dataUrl,
+            cleanDataUrl: targetDataUrl || null,
+            passthroughUrl: sourceUrl || null,
             reason: result?.reason || "watermark_not_applied",
           });
         }

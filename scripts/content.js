@@ -81,15 +81,18 @@
       }
 
       try {
-        const dataUrl = preloadedDataUrl || (await urlToDataUrl(url));
-        if (!dataUrl) throw new Error("Không thể chuyển đổi dữ liệu từ liên kết");
+        let dataUrl = preloadedDataUrl;
+        if (!isVideo && !dataUrl && url) {
+          dataUrl = await urlToDataUrl(url);
+          if (!dataUrl) throw new Error("Không thể chuyển đổi dữ liệu từ liên kết");
+        }
 
         const response = await new Promise((resolve) => {
           chrome.runtime.sendMessage(
             {
               action: isVideo ? "removeVideoWatermarkAndDownload" : "removeWatermarkAndDownload",
               imageUrl: !isVideo ? dataUrl : undefined,
-              videoUrl: isVideo ? dataUrl : undefined,
+              videoUrl: isVideo ? preloadedDataUrl : undefined,
               mediaUrl: url || undefined,
               mediaType: isVideo ? "video" : "image",
               taskId,

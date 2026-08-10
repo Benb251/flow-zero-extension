@@ -136,13 +136,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           throw new Error(offscreenResult?.error || "Offscreen processing failed");
         }
 
-        const finalDataUrl = offscreenResult.cleanDataUrl || inputDataUrl;
+        const finalMediaUrl = offscreenResult.cleanDataUrl || offscreenResult.passthroughUrl || inputDataUrl;
+        if (!finalMediaUrl || typeof finalMediaUrl !== "string") {
+          throw new Error("No valid media URL available for download");
+        }
 
         if (message.action === "cleanWatermark") {
           sendResponse({
             success: true,
             cleaned: offscreenResult.cleaned,
-            dataUrl: finalDataUrl,
+            dataUrl: finalMediaUrl,
             stats: offscreenResult.stats
           });
           return;
@@ -153,7 +156,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const sanitizedFilename = sanitizeFilename(filename, defaultExt);
 
         const downloadId = await chrome.downloads.download({
-          url: finalDataUrl,
+          url: finalMediaUrl,
           filename: sanitizedFilename,
           saveAs: false
         });
@@ -179,7 +182,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Intercept native downloads at the browser level when extension is ENABLED
 chrome.downloads.onCreated.addListener(async (item) => {
   const state = await chrome.storage.local.get(["flowzero_enabled"]);
-  if (state.flowzero_enabled === false) return; // Truly passive when disabled
+  if (state.flowzero_enabled === false) return;
 
   if (item.url.startsWith("data:") || item.url.startsWith("blob:") || item.url.startsWith("chrome-extension:")) return;
 
@@ -193,7 +196,7 @@ chrome.downloads.onCreated.addListener(async (item) => {
     (async () => {
       try {
         await ensureOffscreenDocument();
-        const isVideo = detectMediaType(item.url, item.filename) === "video";
+        const isVideo = detectMediaType(item.url, item.filename, item.mime) === "video";
 
         console.log("[FlowZero Background] Forwarding intercepted native download to Offscreen:", item.filename, "Video:", isVideo);
 
@@ -224,15 +227,18 @@ chrome.downloads.onCreated.addListener(async (item) => {
           });
         }
 
-        if (offscreenResult && offscreenResult.success && offscreenResult.cleanDataUrl) {
-          const defaultExt = isVideo ? ".mp4" : ".png";
-          const safeFilename = sanitizeFilename(item.filename, defaultExt);
-          
-          chrome.downloads.download({
-            url: offscreenResult.cleanDataUrl,
-            filename: safeFilename.replace(/\.[^/.]+$/, "") + "_flowzero" + defaultExt,
-            saveAs: false
-          });
+        if (offscreenResult && offscreenResult.success) {
+          const finalMediaUrl = offscreenResult.cleanDataUrl || offscreenResult.passthroughUrl || item.url;
+          if (finalMediaUrl && typeof finalMediaUrl === "string") {
+            const defaultExt = isVideo ? ".mp4" : ".png";
+            const safeFilename = sanitizeFilename(item.filename, defaultExt);
+            
+            chrome.downloads.download({
+              url: finalMediaUrl,
+              filename: safeFilename.replace(/\.[^/.]+$/, "") + "_flowzero" + defaultExt,
+              saveAs: false
+            });
+          }
         }
       } catch (err) {
         console.error("[FlowZero Background] Native download intercept failed:", err);
