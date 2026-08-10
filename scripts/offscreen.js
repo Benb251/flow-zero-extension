@@ -96,9 +96,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "processVideoWatermark") {
     (async () => {
       try {
-        const { dataUrl, taskId, originTabId } = message;
-        if (!dataUrl) {
-          sendResponse({ success: false, error: "No video dataUrl provided" });
+        const { dataUrl, sourceUrl, taskId, originTabId } = message;
+        if (!dataUrl && !sourceUrl) {
+          sendResponse({ success: false, error: "No video input provided" });
           return;
         }
 
@@ -108,7 +108,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         console.log("[FlowZero Offscreen] Starting video watermark removal...");
-        const inputBlob = dataURLToBlob(dataUrl);
+
+        let inputBlob = null;
+        if (sourceUrl && typeof isAllowedFlowMediaUrl === "function" && isAllowedFlowMediaUrl(sourceUrl)) {
+          try {
+            const resp = await fetch(sourceUrl, { cache: "no-store" });
+            if (resp.ok) inputBlob = await resp.blob();
+          } catch (e) {
+            console.warn("[FlowZero Offscreen] Direct fetch fallback to dataUrl:", e.message);
+          }
+        }
+
+        if (!inputBlob && dataUrl) {
+          inputBlob = dataURLToBlob(dataUrl);
+        }
+
+        if (!inputBlob) {
+          throw new Error("Could not acquire valid video input Blob");
+        }
 
         const result = await remover.process(inputBlob, {
           onProgress: (progress) => {

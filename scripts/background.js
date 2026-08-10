@@ -66,6 +66,27 @@ async function blobToDataUrl(blob) {
   return `data:${blob.type || "application/octet-stream"};base64,${base64}`;
 }
 
+// Selects the appropriate media source representation (remote URL or preloaded DataURL fallback)
+function selectMediaSource(mediaUrl, videoUrl, imageUrl) {
+  const fallbackDataUrl = videoUrl || imageUrl;
+  const remoteUrl = mediaUrl;
+
+  let selectedSource = null;
+  let selectedRemoteUrl = null;
+
+  if (remoteUrl && isAllowedFlowMediaUrl(remoteUrl)) {
+    selectedRemoteUrl = remoteUrl;
+  } else if (fallbackDataUrl && typeof fallbackDataUrl === "string" && fallbackDataUrl.startsWith("data:")) {
+    selectedSource = fallbackDataUrl;
+  }
+
+  return {
+    selectedSource,
+    selectedRemoteUrl,
+    isValid: Boolean(selectedSource || selectedRemoteUrl)
+  };
+}
+
 // Main message listener
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Relay progress messages directly to originating tab using originTabId
@@ -85,27 +106,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       message.action === "cleanWatermark" || 
       message.action === "removeVideoWatermarkAndDownload") {
     (async () => {
+      // 1. Enforce disabled state check at final background boundary
+      const state = await chrome.storage.local.get(["flowzero_enabled"]);
+      if (state.flowzero_enabled === false) {
+        sendResponse({ success: false, error: "FlowZero is disabled" });
+        return;
+      }
+
       try {
         const { imageUrl, videoUrl, mediaUrl, filename = "flowzero_clean.png", mime = "image/png", taskId } = message;
-        const sourceUrl = mediaUrl || videoUrl || imageUrl;
         const originTabId = sender.tab?.id;
 
-        if (!sourceUrl) {
-          sendResponse({ success: false, error: "Missing source media URL" });
+        const selection = selectMediaSource(mediaUrl, videoUrl, imageUrl);
+        if (!selection.isValid) {
+          sendResponse({ success: false, error: "Invalid or disallowed media URL" });
           return;
         }
 
-        if (!isAllowedFlowMediaUrl(sourceUrl)) {
-          sendResponse({ success: false, error: "Disallowed target media URL domain" });
-          return;
-        }
+        let inputDataUrl = selection.selectedSource;
+        const targetRemoteUrl = selection.selectedRemoteUrl;
 
-        let inputDataUrl = sourceUrl;
-
-        // If URL is an external link / blob URL, fetch it in background if needed
-        if (!sourceUrl.startsWith("data:")) {
+        // If a trusted remote HTTP(S) URL is available, fetch it in background
+        if (targetRemoteUrl) {
           try {
-            const resp = await fetch(sourceUrl, { cache: "no-store" });
+            const resp = await fetch(targetRemoteUrl, { cache: "no-store" });
             if (resp.ok) {
               const blob = await resp.blob();
               let isMp4 = false;
@@ -127,12 +151,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           } catch (e) {
             console.warn("[FlowZero Background] Fetch fallback warning:", e.message);
           }
-        } else {
-          const match = sourceUrl.match(/^data:([^;]+);/);
+        } else if (inputDataUrl) {
+          const match = inputDataUrl.match(/^data:([^;]+);/);
           if (match && (match[1].startsWith("video/") || match[1] === "application/mp4")) {
             isVideoAction = true;
           } else {
-            const b64Data = sourceUrl.split(",")[1];
+            const b64Data = inputDataUrl.split(",")[1];
             if (b64Data) {
               const b64Prefix = b64Data.substring(0, 30);
               const binaryStr = atob(b64Prefix);
@@ -156,7 +180,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             target: "offscreen",
             action: "processVideoWatermark",
             dataUrl: inputDataUrl,
-            sourceUrl: sourceUrl,
+            sourceUrl: targetRemoteUrl,
             taskId,
             originTabId
           });

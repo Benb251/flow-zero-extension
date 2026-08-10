@@ -7,8 +7,33 @@
   const WRAPPER_CLASS = "flowzero-btn-wrapper";
   const PROCESSED_ATTR = "data-flowzero-injected";
 
-  let isExtensionEnabled = true;
+  let isExtensionEnabled = false;
   let userFlowTier = "FREE";
+
+  function forwardStateToInterceptor(enabled) {
+    const origin = window.location.origin && window.location.origin !== "null" ? window.location.origin : "*";
+    window.postMessage({ type: "FLOWZERO_STATE_CHANGE", enabled }, origin);
+  }
+
+  // Startup state bootstrap at document_start: query storage and notify MAIN interceptor immediately
+  chrome.storage.local.get(["flowzero_enabled"], (res) => {
+    isExtensionEnabled = res.flowzero_enabled !== false;
+    forwardStateToInterceptor(isExtensionEnabled);
+    if (document.readyState !== "loading") {
+      updateButtonsVisibility();
+      if (isExtensionEnabled) scanAndInject();
+    }
+  });
+
+  // Listen for storage toggle updates
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes.flowzero_enabled !== undefined) {
+      isExtensionEnabled = changes.flowzero_enabled.newValue !== false;
+      forwardStateToInterceptor(isExtensionEnabled);
+      updateButtonsVisibility();
+      if (isExtensionEnabled) scanAndInject();
+    }
+  });
 
   // Listen for tier detection & intercepted downloads from Main World Interceptor
   window.addEventListener("message", async (event) => {
@@ -263,7 +288,7 @@
 
   let toastHideTimer = null;
 
-  // Safe Toast Notification with DOM textContent
+  // Safe Toast Notification with DOM textContent and translateX(-50%) centering
   function showToast(message, type = "info", duration = 3200, percent = null) {
     let toast = document.querySelector(".flowzero-toast");
     if (!toast) {
@@ -278,7 +303,7 @@
     }
 
     toast.style.opacity = "1";
-    toast.style.transform = "translateY(0)";
+    toast.style.transform = "translateX(-50%) translateY(0)";
 
     const iconColor = type === "success" ? "#22c55e" : type === "error" ? "#ef4444" : type === "warning" ? "#f59e0b" : "#a855f7";
     const iconSvg = type === "success" ? '<polyline points="20 6 9 17 4 12"></polyline>' :
@@ -312,15 +337,10 @@
       toastHideTimer = setTimeout(() => {
         toast.style.transition = "opacity 0.3s ease, transform 0.3s ease";
         toast.style.opacity = "0";
-        toast.style.transform = "translateY(10px)";
+        toast.style.transform = "translateX(-50%) translateY(10px)";
         setTimeout(() => toast.remove(), 300);
       }, duration);
     }
-  }
-
-  function forwardStateToInterceptor(enabled) {
-    const origin = window.location.origin && window.location.origin !== "null" ? window.location.origin : "*";
-    window.postMessage({ type: "FLOWZERO_STATE_CHANGE", enabled }, origin);
   }
 
   // Split Google CDN size suffix (=s..., =w..., =...)
