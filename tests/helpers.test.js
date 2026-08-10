@@ -56,6 +56,17 @@ test("Direct HTTP Video Passthrough Resolution (applied=false)", () => {
   assert.equal(finalMediaUrl, "https://flow-content.google/v1/media/12345");
 });
 
+test("Self-download Guard (byExtensionId)", () => {
+  const runtimeId = "extension_id_12345";
+  const itemFromExtension = { byExtensionId: "extension_id_12345", url: "https://flow-content.google/v1/media/123" };
+  const itemFromUser = { byExtensionId: undefined, url: "https://flow-content.google/v1/media/123" };
+
+  const isSelfDownload = (item) => item.byExtensionId === runtimeId;
+
+  assert.equal(isSelfDownload(itemFromExtension), true);
+  assert.equal(isSelfDownload(itemFromUser), false);
+});
+
 test("Filename Sanitization", () => {
   assert.equal(sanitizeFilename("file:name/with*invalid?chars.png"), "file_name_with_invalid_chars.png");
   assert.equal(sanitizeFilename("normal_file.mp4"), "normal_file.mp4");

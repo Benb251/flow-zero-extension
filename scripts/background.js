@@ -181,6 +181,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Intercept native downloads at the browser level when extension is ENABLED
 chrome.downloads.onCreated.addListener(async (item) => {
+  if (item.byExtensionId === chrome.runtime.id) {
+    return;
+  }
+
   const state = await chrome.storage.local.get(["flowzero_enabled"]);
   if (state.flowzero_enabled === false) return;
 
