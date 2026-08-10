@@ -451,7 +451,7 @@
     // 2. Wait for Context Menu to appear
     let contextMenu = null;
     for (let i = 0; i < 15; i++) {
-      await sleep(100);
+      await sleep(120);
       const menus = document.querySelectorAll('[role="menu"], [data-radix-menu-content], [aria-label*="menu" i], .context-menu');
       for (const m of menus) {
         if (m.offsetWidth > 0 && m.offsetHeight > 0) {
@@ -466,6 +466,8 @@
       console.warn("[FlowZero] Context menu did not appear.");
       return false;
     }
+
+    await sleep(100);
 
     // 3. Find "Download" / "Tải xuống" item in context menu
     const menuItems = contextMenu.querySelectorAll('[role="menuitem"], button, div[tabindex]');
@@ -506,16 +508,17 @@
 
     downloadItem.dispatchEvent(new PointerEvent("pointerover", pointerOpts));
     downloadItem.dispatchEvent(new PointerEvent("pointerenter", pointerOpts));
-    downloadItem.dispatchEvent(new PointerEvent("pointerdown", { ...pointerOpts, button: 0 }));
-    downloadItem.dispatchEvent(new PointerEvent("pointerup", { ...pointerOpts, button: 0 }));
     downloadItem.dispatchEvent(new MouseEvent("mouseover", mouseOpts));
     downloadItem.dispatchEvent(new MouseEvent("mouseenter", mouseOpts));
+    await sleep(120);
+    downloadItem.dispatchEvent(new PointerEvent("pointerdown", { ...pointerOpts, button: 0 }));
+    downloadItem.dispatchEvent(new PointerEvent("pointerup", { ...pointerOpts, button: 0 }));
     downloadItem.click();
 
     // 5. Wait for Submenu with resolutions (1K, 2K, 4K)
     let subMenu = null;
     for (let i = 0; i < 15; i++) {
-      await sleep(100);
+      await sleep(120);
       const allMenus = document.querySelectorAll('[role="menu"], [data-radix-menu-content], .submenu');
       for (const m of allMenus) {
         if (m !== contextMenu && m.offsetWidth > 0 && m.offsetHeight > 0) {
@@ -530,6 +533,8 @@
       console.warn("[FlowZero] Resolution submenu not found.");
       return false;
     }
+
+    await sleep(150);
 
     // 6. Find target resolution item (e.g. 2K, 4K, 1K)
     const subItems = subMenu.querySelectorAll('[role="menuitem"], button, div[tabindex]');
@@ -567,6 +572,7 @@
     // 7. Click target resolution item to trigger native Flow upscale & download!
     console.log(`[FlowZero] Clicking Flow native [${resUpper}] item:`, targetSubItem.textContent?.trim());
     targetSubItem.click();
+    return true;
     return true;
   }
 
