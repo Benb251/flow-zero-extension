@@ -603,20 +603,18 @@
     console.log("[FlowZero] Resolution submenu found");
     await sleep(150);
 
-    const subItems = subMenu.querySelectorAll('[role="menuitem"], button, div[tabindex]');
+    let subItems = subMenu.querySelectorAll('[role="menuitem"]');
+    if (!subItems || subItems.length === 0) {
+      subItems = subMenu.querySelectorAll('button, div[tabindex]');
+    }
+
     let targetSubItem = null;
 
     for (const item of subItems) {
       const rawText = item.textContent || "";
       const normalized = rawText.replace(/\s+/g, " ").trim().toUpperCase();
 
-      if (
-        normalized === resUpper ||
-        normalized.startsWith(resUpper + " ") ||
-        normalized.startsWith(resUpper + "\N") ||
-        normalized.includes(` ${resUpper}`) ||
-        new RegExp(`\\b${resUpper}\\b`, "i").test(normalized)
-      ) {
+      if (normalized.startsWith(resUpper)) {
         if (item.getAttribute("aria-disabled") === "true" || item.hasAttribute("disabled")) {
           console.warn(`[FlowZero] Option ${resUpper} is disabled in Flow.`);
           showToast(`Tùy chọn ${resUpper} không khả dụng cho tài khoản hiện tại`, "warning", 3500);
