@@ -709,9 +709,6 @@
                     !userFlowTier.includes("NOT_PAID") && 
                     !userFlowTier.includes("PAYGATE_TIER_ONE");
 
-    console.log("[FlowZero] Content received tier:", userFlowTier);
-    console.log("[FlowZero] 4K visibility:", isUltra ? "VISIBLE" : "HIDDEN");
-
     wrappers.forEach((w) => {
       w.classList.toggle("flowzero-hidden", !isExtensionEnabled);
       const btn4k = w.querySelector('.flowzero-menu-item[data-quality="4k"]');
