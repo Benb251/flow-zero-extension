@@ -6,6 +6,8 @@
  *   - Video: Hardware-accelerated WebCodecs Demux/Decode/Unblend/Encode/Mux (VideoWatermarkRemover)
  */
 
+import { isAllowedFlowMediaUrl } from "../lib/flowzero-utils.js";
+
 // Helper to convert Blob to DataURL
 function blobToDataURL(blob) {
   return new Promise((resolve, reject) => {
@@ -96,8 +98,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "processVideoWatermark") {
     (async () => {
       try {
-        const { dataUrl, sourceUrl, taskId, originTabId } = message;
-        if (!dataUrl && !sourceUrl) {
+        const { dataUrl, fallbackDataUrl, sourceUrl, taskId, originTabId } = message;
+        const targetDataUrl = fallbackDataUrl || dataUrl;
+
+        if (!targetDataUrl && !sourceUrl) {
           sendResponse({ success: false, error: "No video input provided" });
           return;
         }
@@ -110,21 +114,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.log("[FlowZero Offscreen] Starting video watermark removal...");
 
         let inputBlob = null;
-        if (sourceUrl && typeof isAllowedFlowMediaUrl === "function" && isAllowedFlowMediaUrl(sourceUrl)) {
+        if (sourceUrl && isAllowedFlowMediaUrl(sourceUrl)) {
           try {
+            console.log("[FlowZero Offscreen] Fetching video stream directly from trusted HTTP(S) URL:", sourceUrl);
             const resp = await fetch(sourceUrl, { cache: "no-store" });
             if (resp.ok) inputBlob = await resp.blob();
           } catch (e) {
-            console.warn("[FlowZero Offscreen] Direct fetch fallback to dataUrl:", e.message);
+            console.warn("[FlowZero Offscreen] Direct HTTP fetch failed, falling back to DataURL:", e.message);
           }
         }
 
-        if (!inputBlob && dataUrl) {
-          inputBlob = dataURLToBlob(dataUrl);
+        if (!inputBlob && targetDataUrl) {
+          console.log("[FlowZero Offscreen] Loading video from preloaded DataURL fallback...");
+          inputBlob = dataURLToBlob(targetDataUrl);
         }
 
         if (!inputBlob) {
-          throw new Error("Could not acquire valid video input Blob");
+          throw new Error("Could not acquire valid video input Blob from sourceUrl or fallbackDataUrl");
         }
 
         const result = await remover.process(inputBlob, {

@@ -668,22 +668,8 @@
 
   function init() {
     injectStyles();
-
-    chrome.storage.local.get(["flowzero_enabled"], (res) => {
-      isExtensionEnabled = res.flowzero_enabled !== false;
-      forwardStateToInterceptor(isExtensionEnabled);
-      updateButtonsVisibility();
-      if (isExtensionEnabled) scanAndInject();
-    });
-
-    chrome.storage.onChanged.addListener((changes, area) => {
-      if (area === "local" && changes.flowzero_enabled !== undefined) {
-        isExtensionEnabled = changes.flowzero_enabled.newValue !== false;
-        forwardStateToInterceptor(isExtensionEnabled);
-        updateButtonsVisibility();
-        if (isExtensionEnabled) scanAndInject();
-      }
-    });
+    updateButtonsVisibility();
+    if (isExtensionEnabled) scanAndInject();
 
     let scanScheduled = false;
     const observer = new MutationObserver((mutations) => {

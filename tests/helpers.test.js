@@ -29,18 +29,18 @@ test("Select Media Source - blob: Fallback Regression", () => {
   
   const result = selectMediaSource(mediaUrl, videoUrl, null);
   assert.equal(result.isValid, true);
-  assert.equal(result.selectedRemoteUrl, null);
-  assert.equal(result.selectedSource, videoUrl);
+  assert.equal(result.remoteUrl, null);
+  assert.equal(result.fallbackDataUrl, videoUrl);
 });
 
-test("Select Media Source - Trusted HTTP Preference", () => {
+test("Select Media Source - Trusted HTTP Preference & Fallback Preservation", () => {
   const mediaUrl = "https://flow-content.google/v1/media/12345";
   const videoUrl = "data:video/mp4;base64,AAAAFftypmp42";
 
   const result = selectMediaSource(mediaUrl, videoUrl, null);
   assert.equal(result.isValid, true);
-  assert.equal(result.selectedRemoteUrl, mediaUrl);
-  assert.equal(result.selectedSource, null);
+  assert.equal(result.remoteUrl, mediaUrl);
+  assert.equal(result.fallbackDataUrl, videoUrl);
 });
 
 test("Filename Sanitization", () => {

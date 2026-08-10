@@ -1,29 +1,17 @@
 /*
- * FlowZero Background Service Worker (Manifest V3)
+ * FlowZero Background Service Worker (Manifest V3 Module)
  * Handles Image & Video Watermark Removal Orchestration
  */
 
+import {
+  isAllowedFlowMediaUrl,
+  sanitizeFilename,
+  detectMediaType,
+  selectMediaSource
+} from "../lib/flowzero-utils.js";
+
 const OFFSCREEN_DOCUMENT_PATH = "scripts/offscreen.html";
 let creatingOffscreenDocument = null;
-
-// Validate media URLs against explicit trusted Google Flow domains
-function isAllowedFlowMediaUrl(value) {
-  if (!value || typeof value !== "string") return false;
-  if (value.startsWith("data:")) return true;
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "https:") return false;
-    const host = url.hostname.toLowerCase();
-    return (
-      host === "labs.google" ||
-      host === "flow-content.google" ||
-      host === "storage.googleapis.com" ||
-      host.endsWith(".googleusercontent.com")
-    );
-  } catch {
-    return false;
-  }
-}
 
 // Ensure Offscreen Document is active for media operations (Chrome 116+ getContexts)
 async function ensureOffscreenDocument() {
@@ -66,27 +54,6 @@ async function blobToDataUrl(blob) {
   return `data:${blob.type || "application/octet-stream"};base64,${base64}`;
 }
 
-// Selects the appropriate media source representation (remote URL or preloaded DataURL fallback)
-function selectMediaSource(mediaUrl, videoUrl, imageUrl) {
-  const fallbackDataUrl = videoUrl || imageUrl;
-  const remoteUrl = mediaUrl;
-
-  let selectedSource = null;
-  let selectedRemoteUrl = null;
-
-  if (remoteUrl && isAllowedFlowMediaUrl(remoteUrl)) {
-    selectedRemoteUrl = remoteUrl;
-  } else if (fallbackDataUrl && typeof fallbackDataUrl === "string" && fallbackDataUrl.startsWith("data:")) {
-    selectedSource = fallbackDataUrl;
-  }
-
-  return {
-    selectedSource,
-    selectedRemoteUrl,
-    isValid: Boolean(selectedSource || selectedRemoteUrl)
-  };
-}
-
 // Main message listener
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Relay progress messages directly to originating tab using originTabId
@@ -123,50 +90,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
 
-        let inputDataUrl = selection.selectedSource;
-        const targetRemoteUrl = selection.selectedRemoteUrl;
+        let inputDataUrl = selection.fallbackDataUrl;
+        const targetRemoteUrl = selection.remoteUrl;
 
-        // If a trusted remote HTTP(S) URL is available, fetch it in background
-        if (targetRemoteUrl) {
+        // For images (or fallback mode), if trusted remote URL is present, fetch and build DataURL for Image pipeline
+        if (!isVideoAction && targetRemoteUrl) {
           try {
             const resp = await fetch(targetRemoteUrl, { cache: "no-store" });
             if (resp.ok) {
               const blob = await resp.blob();
-              let isMp4 = false;
-              if (blob.type.startsWith("video/") || blob.type === "application/mp4") {
-                isMp4 = true;
-              } else if (blob.size > 12) {
-                const slice = blob.slice(0, 12);
-                const buf = await slice.arrayBuffer();
-                const bytes = new Uint8Array(buf);
-                if (bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) {
-                  isMp4 = true;
-                }
-              }
-              if (isMp4) {
-                isVideoAction = true;
-              }
               inputDataUrl = await blobToDataUrl(blob);
             }
           } catch (e) {
-            console.warn("[FlowZero Background] Fetch fallback warning:", e.message);
-          }
-        } else if (inputDataUrl) {
-          const match = inputDataUrl.match(/^data:([^;]+);/);
-          if (match && (match[1].startsWith("video/") || match[1] === "application/mp4")) {
-            isVideoAction = true;
-          } else {
-            const b64Data = inputDataUrl.split(",")[1];
-            if (b64Data) {
-              const b64Prefix = b64Data.substring(0, 30);
-              const binaryStr = atob(b64Prefix);
-              if (binaryStr.length >= 12) {
-                if (binaryStr.charCodeAt(4) === 0x66 && binaryStr.charCodeAt(5) === 0x74 && 
-                    binaryStr.charCodeAt(6) === 0x79 && binaryStr.charCodeAt(7) === 0x70) {
-                  isVideoAction = true;
-                }
-              }
-            }
+            console.warn("[FlowZero Background] Image fetch warning:", e.message);
           }
         }
 
@@ -176,11 +112,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         let offscreenResult = null;
 
         if (isVideoAction) {
+          // Pass remote HTTP(S) URL directly to offscreen (bypassing background Base64 conversion for trusted video)
           offscreenResult = await chrome.runtime.sendMessage({
             target: "offscreen",
             action: "processVideoWatermark",
-            dataUrl: inputDataUrl,
             sourceUrl: targetRemoteUrl,
+            fallbackDataUrl: selection.fallbackDataUrl,
+            dataUrl: inputDataUrl,
             taskId,
             originTabId
           });
