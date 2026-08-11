@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "minimum_chrome_version": "116",
-  "name": "FlowZero - Flow Image & Video Watermark Remover",
+  "name": "FlowZero - Flow Watermark Remover",
   "version": "1.3.0",
   "description": "Tiện ích 1-click tự động xóa watermark khi tải hình ảnh và video từ Google Flow (labs.google)",
   "icons": {
@@ -42,8 +42,7 @@
   "permissions": [
     "downloads",
     "offscreen",
-    "storage",
-    "activeTab"
+    "storage"
   ],
   "host_permissions": [
     "https://labs.google/*",
