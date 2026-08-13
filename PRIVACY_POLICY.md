@@ -1,28 +1,23 @@
-# Privacy Policy for FlowZero
+# Privacy Policy for FlowZero - Flow Watermark Remover
 
-**Last updated:** August 11, 2026
+**Effective Date:** August 13, 2026
 
-FlowZero ("we", "our", or "us") is committed to protecting your privacy. This Privacy Policy explains how FlowZero handles user data when you use our Chrome Extension.
+FlowZero ("we", "our", or "us") is committed to protecting user privacy. This Privacy Policy outlines how the FlowZero Chrome Extension handles user data and permissions.
 
-## 1. Local Processing Only
-FlowZero operates **entirely locally within your Google Chrome browser**. 
-- All image and video processing (watermark removal) occurs on your local device using standard browser APIs (Canvas, WebCodecs).
-- No image, video, URL, prompt, or any media content is ever transmitted to external servers, cloud services, or third parties.
+## 1. Data Collection & Privacy
+FlowZero does **NOT** collect, store, track, or transmit any personal data, user credentials, browsing history, or IP addresses. 
 
-## 2. Information Collection and Usage
-- **Personal Data:** FlowZero does **NOT** collect, store, or transmit any personally identifiable information (PII) such as your name, email address, IP address, or Google account credentials.
-- **Extension Settings:** FlowZero uses `chrome.storage.local` exclusively to store your extension preferences (e.g., ON/OFF toggle state) locally on your device. This data never leaves your browser.
+## 2. Local Processing
+All image and video processing operations (such as canvas manipulation, watermark detection/removal, and format handling) occur **100% locally** inside your browser using Web APIs and Manifest V3 offscreen documents. No media files or processed content are ever sent to or stored on external servers.
 
-## 3. Remote Code & Third-Party Analytics
-- FlowZero contains **NO remote code**, tracking scripts, telemetries, or third-party analytics.
-- It complies strictly with Chrome Web Store Manifest V3 guidelines.
+## 3. Use of Permissions
+- **`downloads`**: Used exclusively to save processed media files directly to your device upon your download action.
+- **`offscreen`**: Used strictly to execute canvas rendering and image processing tasks in a background context as required by Manifest V3.
+- **`storage`**: Used solely to persist your extension settings and user preferences locally on your browser.
+- **Host Permissions (`labs.google`, `googleusercontent.com`, `storage.googleapis.com`, `flow-content.google`)**: Used strictly to access media resources on supported domains to perform local processing.
 
-## 4. Permissions Disclosure
-- `downloads`: Used solely to save the watermark-free images and videos to your local Downloads folder upon your request.
-- `offscreen`: Used to execute WebCodecs and Canvas rendering in an isolated offscreen document inside Chrome.
-- `storage`: Used to persist local extension toggle states.
-- Host permissions (`labs.google`, `*.googleusercontent.com`, `*.googleapis.com`, `flow-content.google`): Used exclusively to fetch local media Blobs on Google Flow pages for processing.
+## 4. Third-Party Sharing
+We do not sell, rent, trade, or transfer any user data to third parties.
 
-## 5. Contact Us
-If you have any questions about this Privacy Policy, please open an issue on our GitHub repository:
-https://github.com/Benb251/flow-zero-extension
+## 5. Contact Information
+If you have any questions or feedback regarding this Privacy Policy, please open an issue or reach out via our GitHub repository.
