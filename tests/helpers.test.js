@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   isAllowedFlowMediaUrl,
+  isAllowedFlowDownloadReferrer,
   sanitizeFilename,
   detectMediaType,
   selectMediaSource
@@ -21,6 +22,40 @@ test("URL Allowlist Validation - Rejected URLs", () => {
   assert.equal(isAllowedFlowMediaUrl("javascript:alert(1)"), false);
   assert.equal(isAllowedFlowMediaUrl("file:///C:/Windows/system32"), false);
   assert.equal(isAllowedFlowMediaUrl("blob:https://labs.google/12345"), false);
+});
+
+test("Download Referrer Validation - Accepted Flow Origins", () => {
+  assert.equal(isAllowedFlowDownloadReferrer("https://labs.google/flow"), true);
+  assert.equal(isAllowedFlowDownloadReferrer("https://labs.google/fx/editor/project123"), true);
+  assert.equal(isAllowedFlowDownloadReferrer("https://LABS.GOOGLE/flow"), true);
+});
+
+test("Download Referrer Validation - Rejected Non-Flow & Malformed Referrers", () => {
+  assert.equal(isAllowedFlowDownloadReferrer("http://labs.google/flow"), false); // HTTP rejected
+  assert.equal(isAllowedFlowDownloadReferrer(""), false); // empty string
+  assert.equal(isAllowedFlowDownloadReferrer(null), false); // null
+  assert.equal(isAllowedFlowDownloadReferrer(undefined), false); // undefined
+  assert.equal(isAllowedFlowDownloadReferrer("not-a-url"), false); // malformed
+  assert.equal(isAllowedFlowDownloadReferrer("https://labs.google.attacker.example/"), false); // subdomain spoof
+  assert.equal(isAllowedFlowDownloadReferrer("https://evil-labs.google/"), false); // domain prefix spoof
+  assert.equal(isAllowedFlowDownloadReferrer("https://google.com/"), false); // other google domain
+  assert.equal(isAllowedFlowDownloadReferrer("https://otherwebsite.com/gallery"), false); // third party
+});
+
+test("Download Interception Decision - Non-Flow Referrer with Google CDN Media", () => {
+  const itemFromThirdParty = {
+    referrer: "https://otherwebsite.com/blog",
+    url: "https://storage.googleapis.com/some-bucket/photo.jpg"
+  };
+  const shouldInterceptThirdParty = isAllowedFlowDownloadReferrer(itemFromThirdParty.referrer) && isAllowedFlowMediaUrl(itemFromThirdParty.url);
+  assert.equal(shouldInterceptThirdParty, false);
+
+  const itemFromFlow = {
+    referrer: "https://labs.google/flow",
+    url: "https://storage.googleapis.com/flow-bucket/photo.jpg"
+  };
+  const shouldInterceptFlow = isAllowedFlowDownloadReferrer(itemFromFlow.referrer) && isAllowedFlowMediaUrl(itemFromFlow.url);
+  assert.equal(shouldInterceptFlow, true);
 });
 
 test("Select Media Source - blob: Fallback Regression", () => {

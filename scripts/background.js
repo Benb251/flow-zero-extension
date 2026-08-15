@@ -5,6 +5,7 @@
 
 import {
   isAllowedFlowMediaUrl,
+  isAllowedFlowDownloadReferrer,
   sanitizeFilename,
   detectMediaType,
   selectMediaSource
@@ -190,65 +191,68 @@ chrome.downloads.onCreated.addListener(async (item) => {
 
   if (item.url.startsWith("data:") || item.url.startsWith("blob:") || item.url.startsWith("chrome-extension:")) return;
 
-  if (isAllowedFlowMediaUrl(item.url)) {
-    console.log("[FlowZero Background] Intercepted native download:", item.url);
-    
-    // Cancel the native watermarked download immediately
-    chrome.downloads.cancel(item.id);
+  if (!isAllowedFlowDownloadReferrer(item.referrer)) return;
 
-    // Process the video/image internally
-    (async () => {
-      try {
-        await ensureOffscreenDocument();
-        const isVideo = detectMediaType(item.url, item.filename, item.mime) === "video";
+  const targetUrl = item.finalUrl || item.url;
+  if (!isAllowedFlowMediaUrl(targetUrl)) return;
 
-        console.log("[FlowZero Background] Forwarding intercepted native download to Offscreen:", item.filename, "Video:", isVideo);
+  console.log("[FlowZero Background] Intercepted native download:", targetUrl);
+  
+  // Cancel the native watermarked download immediately
+  chrome.downloads.cancel(item.id);
 
-        let offscreenResult = null;
+  // Process the video/image internally
+  (async () => {
+    try {
+      await ensureOffscreenDocument();
+      const isVideo = detectMediaType(targetUrl, item.filename, item.mime) === "video";
 
-        if (isVideo) {
-          // Direct HTTP(S) video branch: pass sourceUrl directly to Offscreen without pre-fetching or Base64 encoding!
-          offscreenResult = await chrome.runtime.sendMessage({
-            target: "offscreen",
-            action: "processVideoWatermark",
-            sourceUrl: item.url,
-            taskId: "background_intercept_" + Date.now()
-          });
-        } else {
-          // Image branch: fetch and convert to DataURL for canvas processing
-          const res = await fetch(item.url);
-          if (!res.ok) throw new Error("HTTP " + res.status);
-          const blob = await res.blob();
-          const dataUrl = await blobToDataUrl(blob);
+      console.log("[FlowZero Background] Forwarding intercepted native download to Offscreen:", item.filename, "Video:", isVideo);
 
-          offscreenResult = await chrome.runtime.sendMessage({
-            target: "offscreen",
-            action: "processWatermark",
-            dataUrl: dataUrl,
-            sourceUrl: item.url,
-            mime: blob.type,
-            taskId: "background_intercept_" + Date.now()
-          });
-        }
+      let offscreenResult = null;
 
-        if (offscreenResult && offscreenResult.success) {
-          const finalMediaUrl = offscreenResult.cleanDataUrl || offscreenResult.passthroughUrl || item.url;
-          if (finalMediaUrl && typeof finalMediaUrl === "string") {
-            const defaultExt = isVideo ? ".mp4" : ".png";
-            const safeFilename = sanitizeFilename(item.filename, defaultExt);
-            
-            chrome.downloads.download({
-              url: finalMediaUrl,
-              filename: safeFilename.replace(/\.[^/.]+$/, "") + "_flowzero" + defaultExt,
-              saveAs: false
-            });
-          }
-        }
-      } catch (err) {
-        console.error("[FlowZero Background] Native download intercept failed:", err);
+      if (isVideo) {
+        // Direct HTTP(S) video branch: pass sourceUrl directly to Offscreen without pre-fetching or Base64 encoding!
+        offscreenResult = await chrome.runtime.sendMessage({
+          target: "offscreen",
+          action: "processVideoWatermark",
+          sourceUrl: targetUrl,
+          taskId: "background_intercept_" + Date.now()
+        });
+      } else {
+        // Image branch: fetch and convert to DataURL for canvas processing
+        const res = await fetch(targetUrl);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const blob = await res.blob();
+        const dataUrl = await blobToDataUrl(blob);
+
+        offscreenResult = await chrome.runtime.sendMessage({
+          target: "offscreen",
+          action: "processWatermark",
+          dataUrl: dataUrl,
+          sourceUrl: targetUrl,
+          mime: blob.type,
+          taskId: "background_intercept_" + Date.now()
+        });
       }
-    })();
-  }
+
+      if (offscreenResult && offscreenResult.success) {
+        const finalMediaUrl = offscreenResult.cleanDataUrl || offscreenResult.passthroughUrl || targetUrl;
+        if (finalMediaUrl && typeof finalMediaUrl === "string") {
+          const defaultExt = isVideo ? ".mp4" : ".png";
+          const safeFilename = sanitizeFilename(item.filename, defaultExt);
+          
+          chrome.downloads.download({
+            url: finalMediaUrl,
+            filename: safeFilename.replace(/\.[^/.]+$/, "") + "_flowzero" + defaultExt,
+            saveAs: false
+          });
+        }
+      }
+    } catch (err) {
+      console.error("[FlowZero Background] Native download intercept failed:", err);
+    }
+  })();
 });
 
 // Extension installation setup
