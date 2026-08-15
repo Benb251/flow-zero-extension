@@ -4,8 +4,12 @@
  */
 
 (() => {
+  if (window.__flowZeroContentInjected) return;
+  window.__flowZeroContentInjected = true;
+
   const WRAPPER_CLASS = "flowzero-btn-wrapper";
   const PROCESSED_ATTR = "data-flowzero-injected";
+  const MEDIA_OWNER_SELECTOR = ".tile-image-container, [data-test-id='media-tile'], [data-tile-id]";
 
   let isExtensionEnabled = false;
   let userFlowTier = "FREE";
@@ -134,23 +138,24 @@
     style.textContent = `
       .${WRAPPER_CLASS} {
         position: absolute;
-        bottom: 10px;
-        right: 10px;
+        top: 10px;
+        right: 120px;
         z-index: 99999;
         display: inline-flex;
         flex-direction: column;
         align-items: flex-end;
         user-select: none;
-        padding-top: 10px;
+        padding-top: 0px;
         opacity: 0;
         visibility: hidden;
-        transition: opacity 0.2s ease, visibility 0.2s ease;
+        transform: translateY(-6px);
+        transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.2, 0, 0, 1), visibility 0.18s;
       }
 
-      .flowzero-container:hover .${WRAPPER_CLASS},
-      .${WRAPPER_CLASS}.is-hovered {
+      .flowzero-container:hover > .${WRAPPER_CLASS} {
         opacity: 1;
         visibility: visible;
+        transform: translateY(0);
       }
 
       .flowzero-hidden {
@@ -161,33 +166,39 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        padding: 4px;
-        background: transparent;
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        box-sizing: border-box;
+        background: rgba(230, 230, 230, 0.82);
+        color: #303238;
         border: none;
+        border-radius: 10px;
         cursor: pointer;
-        transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s ease;
+        box-shadow: none;
+        transition: background 0.15s ease, transform 0.15s ease;
       }
 
-      .flowzero-main-btn:hover,
-      .${WRAPPER_CLASS}.is-hovered .flowzero-main-btn {
-        transform: translateY(-1px) scale(1.1);
-        filter: drop-shadow(0 4px 10px rgba(168, 85, 247, 0.6));
+      .flowzero-main-btn:hover {
+        background: rgba(218, 218, 218, 0.92);
+        transform: none;
       }
 
       .flowzero-main-btn:active {
-        transform: translateY(0) scale(0.95);
+        background: rgba(205, 205, 205, 0.95);
+        transform: scale(0.96);
       }
 
       .flowzero-main-btn .flowzero-logo-icon {
-        width: 32px;
-        height: 32px;
-        object-fit: contain;
-        transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
+        width: 19px;
+        height: 19px;
+        display: block;
+        fill: currentColor;
+        transition: opacity 0.2s ease;
       }
 
-      .flowzero-main-btn:hover .flowzero-logo-icon,
-      .${WRAPPER_CLASS}.is-hovered .flowzero-logo-icon {
-        transform: scale(1.1);
+      .flowzero-main-btn:hover .flowzero-logo-icon {
+        transform: none;
       }
 
       .flowzero-main-btn.is-loading {
@@ -206,7 +217,8 @@
 
       .flowzero-dropdown-menu {
         position: absolute;
-        bottom: calc(100% + 8px);
+        top: calc(100% + 8px);
+        bottom: auto;
         right: 0;
         width: 60px;
         background: rgba(255, 255, 255, 0.15);
@@ -218,17 +230,17 @@
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
         opacity: 0;
         visibility: hidden;
-        transform: translateY(6px) scale(0.96);
+        transform: translateY(-6px) scale(0.96);
         transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.2s;
         pointer-events: none;
         display: flex;
         flex-direction: column;
       }
 
-      .flowzero-dropdown-menu::after {
+      .flowzero-dropdown-menu::before {
         content: "";
         position: absolute;
-        bottom: -16px;
+        top: -16px;
         left: 0;
         right: 0;
         height: 20px;
@@ -237,7 +249,6 @@
       }
 
       .${WRAPPER_CLASS}:hover .flowzero-dropdown-menu,
-      .${WRAPPER_CLASS}.is-hovered .flowzero-dropdown-menu,
       .flowzero-dropdown-menu:hover {
         opacity: 1;
         visibility: visible;
@@ -722,13 +733,221 @@
     });
   }
 
+  // Locate native top-right action cluster inside media card container
+  function findNativeActionCluster(container) {
+    if (!container) return null;
+
+    const candidates = Array.from(
+      container.querySelectorAll("button:not(.flowzero-main-btn):not(.flowzero-menu-item)")
+    );
+    if (candidates.length < 2) return null;
+
+    const cardRect = container.getBoundingClientRect();
+    if (cardRect.width === 0 || cardRect.height === 0) return null;
+
+    // Filter buttons strictly located in the top-right zone of the card
+    const maxTopOffset = Math.max(50, cardRect.height * 0.25);
+    const maxRightOffset = Math.max(160, cardRect.width * 0.55);
+
+    const topRightButtons = candidates.filter((btn) => {
+      const r = btn.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) return false;
+      const isTop = (r.top - cardRect.top) >= -5 && (r.top - cardRect.top) <= maxTopOffset;
+      const isRight = (cardRect.right - r.right) >= -5 && (cardRect.right - r.right) <= maxRightOffset;
+      return isTop && isRight;
+    });
+
+    if (topRightButtons.length < 2) return null;
+
+    // Group buttons by their direct parent container
+    const parentGroups = new Map();
+    for (const btn of topRightButtons) {
+      const parent = btn.parentElement;
+      if (!parent || parent === container) continue;
+      if (!parentGroups.has(parent)) {
+        parentGroups.set(parent, []);
+      }
+      parentGroups.get(parent).push(btn);
+    }
+
+    let validCluster = null;
+    let minDistanceToTopRight = Infinity;
+
+    for (const [parent, buttons] of parentGroups.entries()) {
+      // Must contain at least 2 visible native action buttons
+      if (buttons.length < 2) continue;
+
+      const parentRect = parent.getBoundingClientRect();
+      if (parentRect.width === 0 || parentRect.height === 0) continue;
+
+      // Validate cluster compactness: reject broad overlays or tall full-card containers
+      const maxClusterWidth = Math.min(220, cardRect.width * 0.7);
+      const maxClusterHeight = Math.min(60, cardRect.height * 0.35);
+
+      if (parentRect.width > maxClusterWidth || parentRect.height > maxClusterHeight) {
+        continue;
+      }
+
+      // Check vertical alignment among button children (horizontal layout check)
+      const firstBtnTop = buttons[0].getBoundingClientRect().top;
+      const isAligned = buttons.every((b) => Math.abs(b.getBoundingClientRect().top - firstBtnTop) < 16);
+      if (!isAligned) continue;
+
+      // Ensure the cluster is anchored near the top-right
+      const topOffset = parentRect.top - cardRect.top;
+      const rightOffset = cardRect.right - parentRect.right;
+      if (topOffset > maxTopOffset || rightOffset > maxRightOffset) {
+        continue;
+      }
+
+      const distance = Math.hypot(Math.max(0, topOffset), Math.max(0, rightOffset));
+      if (distance < minDistanceToTopRight) {
+        minDistanceToTopRight = distance;
+        validCluster = parent;
+      }
+    }
+
+    return validCluster;
+  }
+
+  // Derive transform-independent layout top position relative to container
+  function getLayoutTopWithin(container, element) {
+    if (!container || !element) return null;
+
+    let top = 0;
+    let current = element;
+
+    while (current && current !== container) {
+      top += current.offsetTop || 0;
+      current = current.offsetParent;
+    }
+
+    return current === container ? top : null;
+  }
+
+  // Calculate and apply position of FlowZero wrapper relative to native top-right cluster
+  function positionFlowZeroWrapper(container, wrapper) {
+    if (!container || !wrapper) return;
+
+    const GAP = 6;
+    const BUTTON_SIZE = 36;
+    const FALLBACK_TOP = 10;
+    const FALLBACK_RIGHT = 120; // Safe offset to the left of expected 3-icon native cluster (~110px)
+
+    const cluster = findNativeActionCluster(container);
+    if (cluster) {
+      const cardRect = container.getBoundingClientRect();
+      const clusterRect = cluster.getBoundingClientRect();
+
+      if (cardRect.width > 0 && clusterRect.width > 0) {
+        let referenceButton = null;
+        if (cluster.tagName === "BUTTON" && !cluster.classList.contains("flowzero-main-btn") && !cluster.classList.contains("flowzero-menu-item")) {
+          const r = cluster.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) referenceButton = cluster;
+        } else {
+          const nativeButtons = Array.from(
+            cluster.querySelectorAll("button:not(.flowzero-main-btn):not(.flowzero-menu-item)")
+          ).filter((btn) => {
+            const r = btn.getBoundingClientRect();
+            return r.width > 0 && r.height > 0;
+          });
+          if (nativeButtons.length > 0) {
+            referenceButton = nativeButtons[0];
+          }
+        }
+
+        const computedRight = Math.max(8, Math.round(cardRect.right - clusterRect.left + GAP));
+
+        let computedTop;
+        const layoutTop = referenceButton ? getLayoutTopWithin(container, referenceButton) : null;
+
+        if (layoutTop !== null) {
+          const buttonHeight = referenceButton.offsetHeight || BUTTON_SIZE;
+          const verticalCenterOffset = (buttonHeight - BUTTON_SIZE) / 2;
+          computedTop = Math.max(4, Math.round(layoutTop + verticalCenterOffset));
+        } else {
+          // Fallback to bounding rect if offsetParent chain cannot resolve to container
+          const verticalRect = referenceButton
+            ? referenceButton.getBoundingClientRect()
+            : clusterRect;
+          const verticalCenterOffset = (verticalRect.height - BUTTON_SIZE) / 2;
+          computedTop = Math.max(4, Math.round(verticalRect.top - cardRect.top + verticalCenterOffset));
+        }
+
+        wrapper.style.top = `${computedTop}px`;
+        wrapper.style.right = `${computedRight}px`;
+        wrapper.style.bottom = "auto";
+        wrapper.style.left = "auto";
+        return;
+      }
+    }
+
+    // Safe isolated fallback position near top-right
+    wrapper.style.top = `${FALLBACK_TOP}px`;
+    wrapper.style.right = `${FALLBACK_RIGHT}px`;
+    wrapper.style.bottom = "auto";
+    wrapper.style.left = "auto";
+  }
+
+  // Resolve any nested media tile element to its outermost canonical card container
+  function getCanonicalMediaContainer(el) {
+    if (!el) return null;
+    if (el.tagName === "IMG" || el.tagName === "VIDEO") el = el.parentElement || el;
+
+    let current = el.matches?.(MEDIA_OWNER_SELECTOR)
+      ? el
+      : el.closest?.(MEDIA_OWNER_SELECTOR);
+
+    if (!current) return null;
+
+    let ancestor = current.parentElement?.closest?.(MEDIA_OWNER_SELECTOR) || null;
+    while (ancestor) {
+      current = ancestor;
+      ancestor = current.parentElement?.closest?.(MEDIA_OWNER_SELECTOR) || null;
+    }
+
+    return current;
+  }
+
   function injectButtonInto(container) {
-    if (container.tagName === "IMG") container = container.parentElement;
-    if (!container || container.hasAttribute(PROCESSED_ATTR)) return;
-    container.setAttribute(PROCESSED_ATTR, "true");
+    container = getCanonicalMediaContainer(container);
+    if (!container) return;
 
     if (window.getComputedStyle(container).position === "static") container.style.position = "relative";
     container.classList.add("flowzero-container");
+
+    const wrappers = Array.from(container.querySelectorAll(`.${WRAPPER_CLASS}`));
+    if (!container.dataset.flowzeroHoverBound) {
+      container.dataset.flowzeroHoverBound = "true";
+      container.addEventListener("mouseenter", () => {
+        const currentWrapper = container.querySelector(`.${WRAPPER_CLASS}`);
+        if (currentWrapper) {
+          positionFlowZeroWrapper(container, currentWrapper);
+        }
+      });
+    }
+
+    if (wrappers.length > 0) {
+      const directWrapper = wrappers.find((w) => w.parentElement === container);
+      const primaryWrapper = directWrapper || wrappers[0];
+
+      // Remove any extra duplicate wrappers
+      for (const w of wrappers) {
+        if (w !== primaryWrapper) {
+          w.remove();
+        }
+      }
+
+      // Ensure the retained wrapper is a direct child of the canonical card root
+      if (primaryWrapper.parentElement !== container) {
+        container.appendChild(primaryWrapper);
+      }
+
+      positionFlowZeroWrapper(container, primaryWrapper);
+      return;
+    }
+
+    container.setAttribute(PROCESSED_ATTR, "true");
 
     const wrapper = document.createElement("div");
     wrapper.className = WRAPPER_CLASS;
@@ -742,7 +961,9 @@
         <button class="flowzero-menu-item" data-quality="1080p">1080p</button>
       </div>
       <button class="flowzero-main-btn" title="Tải hình ảnh/video không watermark">
-        <img class="flowzero-logo-icon" src="${chrome.runtime.getURL('assets/icon128.png')}" alt="FlowZero" />
+        <svg class="flowzero-logo-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 2C12.4 7.2 16.8 11.6 22 12C16.8 12.4 12.4 16.8 12 22C11.6 16.8 7.2 12.4 2 12C7.2 11.6 11.6 7.2 12 2Z" />
+        </svg>
       </button>
     `;
 
@@ -752,19 +973,23 @@
       item.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); executeDownload(mainBtn, container, item.getAttribute("data-quality")); });
     });
 
-    let hoverTimer = null;
-    wrapper.addEventListener("mouseenter", () => { if(hoverTimer) clearTimeout(hoverTimer); wrapper.classList.add("is-hovered"); });
-    wrapper.addEventListener("mouseleave", () => { hoverTimer = setTimeout(() => wrapper.classList.remove("is-hovered"), 350); });
     container.appendChild(wrapper);
+    positionFlowZeroWrapper(container, wrapper);
 
     updateButtonsVisibility();
   }
 
   function scanAndInject() {
     if (!isExtensionEnabled) return;
-    document.querySelectorAll(".tile-image-container, [data-test-id='media-tile'], [data-tile-id]").forEach(el => {
-      const container = el.tagName === "IMG" ? (el.parentElement || el) : el;
-      if (container.offsetWidth > 80 && container.offsetHeight > 80) injectButtonInto(container);
+    const seen = new Set();
+    document.querySelectorAll(MEDIA_OWNER_SELECTOR).forEach(el => {
+      const container = getCanonicalMediaContainer(el);
+      if (!container || seen.has(container)) return;
+      seen.add(container);
+
+      if (container.offsetWidth > 80 && container.offsetHeight > 80) {
+        injectButtonInto(container);
+      }
     });
   }
 
