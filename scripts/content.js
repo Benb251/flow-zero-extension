@@ -111,12 +111,23 @@
         });
 
         if (response && response.success) {
-          const statsMsg = response.stats ? ` (${response.stats.frames} frames, ${(response.stats.totalMs / 1000).toFixed(1)}s)` : "";
+          // V8 plan Phase 5 UI contract: only format video timing stats when
+          // media is a video AND the video-only fields actually exist. Image
+          // stats (ncc/mode/threshold/pos) must never render as
+          // "undefined frames / NaN s".
+          const isNumericVideoStat =
+            isVideo &&
+            response.stats &&
+            typeof response.stats.frames === "number" &&
+            typeof response.stats.totalMs === "number";
+          const statsMsg = isNumericVideoStat
+            ? ` (${response.stats.frames} frames, ${(response.stats.totalMs / 1000).toFixed(1)}s)`
+            : "";
           showToast(
             response.cleaned
               ? `Đã xóa watermark & lưu ${isVideo ? "video" : "ảnh"} thành công!${statsMsg}`
-              : `Đã tải ${isVideo ? "video" : "ảnh"} thành công!`,
-            "success",
+              : `Không tìm thấy logo · giữ ${isVideo ? "video" : "ảnh"} gốc`,
+            response.cleaned ? "success" : "warning",
             4000
           );
         } else {

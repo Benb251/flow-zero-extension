@@ -75,8 +75,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             success:      true,
             cleaned:      true,
             cleanDataUrl: canvas.toDataURL(mime),
-            variantId:    result.variantId || "v7-strict-anchors-adaptive-denoise",
-            ncc:          result.ncc,
+            variantId:    result.variantId || "v8-detector-v7-restore",
+            stats: {
+              // Image-typed diagnostics only. Video-only fields (frames /
+              // totalMs) must NOT appear here — the content formatter guards
+              // on them (V8 plan Phase 5 UI contract cleanup).
+              ncc:       result.ncc,
+              mode:      result.mode,
+              threshold: result.threshold,
+              pos:       result.pos,
+              gain:      result.gain,
+              touched:   result.touched,
+            },
           });
         } else {
           sendResponse({
@@ -84,6 +94,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             cleaned:      false,
             reason:       result?.reason || "watermark_not_found",
             cleanDataUrl: dataUrl,
+            stats:        result?.ncc !== undefined
+              ? { ncc: result.ncc, mode: result.mode, threshold: result.threshold }
+              : undefined,
           });
         }
       } catch (err) {

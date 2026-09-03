@@ -8,7 +8,8 @@ import {
   isAllowedFlowDownloadReferrer,
   sanitizeFilename,
   detectMediaType,
-  selectMediaSource
+  selectMediaSource,
+  planNativeDownloadAction
 } from "../lib/flowzero-utils.js";
 
 const OFFSCREEN_DOCUMENT_PATH = "scripts/offscreen.html";
@@ -156,9 +157,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const defaultExt = isVideoAction ? ".mp4" : ".png";
         const sanitizedFilename = sanitizeFilename(filename, defaultExt);
 
+        let outputFilename = sanitizedFilename;
+        if (!isVideoAction && offscreenResult.cleaned !== true) {
+          const extMatch = outputFilename.match(/(\.[^./]+)$/);
+          const ext = extMatch ? extMatch[1] : defaultExt;
+          outputFilename = outputFilename.replace(/\.[^/.]+$/, "") + "_logo_not_found" + ext;
+        }
+
         const downloadId = await chrome.downloads.download({
           url: finalMediaUrl,
-          filename: sanitizedFilename,
+          filename: outputFilename,
           saveAs: false
         });
 
@@ -166,7 +174,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           success: true,
           cleaned: offscreenResult.cleaned,
           downloadId,
-          filename: sanitizedFilename,
+          filename: outputFilename,
           stats: offscreenResult.stats
         });
 
@@ -191,19 +199,28 @@ chrome.downloads.onCreated.addListener(async (item) => {
 
   if (item.url.startsWith("data:") || item.url.startsWith("blob:") || item.url.startsWith("chrome-extension:")) return;
 
+  // Keep the v1.3.1 Flow-origin scope guard (exact host check, not just prefix).
   if (!isAllowedFlowDownloadReferrer(item.referrer)) return;
 
   const targetUrl = item.finalUrl || item.url;
   if (!isAllowedFlowMediaUrl(targetUrl)) return;
 
   console.log("[FlowZero Background] Intercepted native download:", targetUrl);
-  
-  // Cancel the native watermarked download immediately
-  chrome.downloads.cancel(item.id);
 
-  // Process the video/image internally
+  // Failure-safe download (V8 plan Phase 4): pause instead of canceling. If
+  // processing succeeds, cancel the original and download the cleaned file; if
+  // no watermark is found or processing throws, resume the original so the
+  // user never loses the native file.
   (async () => {
+    let pausedOriginal = false;
     try {
+      try {
+        await chrome.downloads.pause(item.id);
+        pausedOriginal = true;
+      } catch (_) {
+        // Pause may fail if the download already completed — process anyway.
+      }
+
       await ensureOffscreenDocument();
       const isVideo = detectMediaType(targetUrl, item.filename, item.mime) === "video";
 
@@ -236,21 +253,37 @@ chrome.downloads.onCreated.addListener(async (item) => {
         });
       }
 
-      if (offscreenResult && offscreenResult.success) {
+      // V8 plan Phase 4: derive the lifecycle decision from the result contract.
+      // cleaned=true → replace the native file; anything else → keep/resume it.
+      const action = planNativeDownloadAction(offscreenResult, { pausedOriginal });
+      if (action.downloadReplacement) {
         const finalMediaUrl = offscreenResult.cleanDataUrl || offscreenResult.passthroughUrl || targetUrl;
         if (finalMediaUrl && typeof finalMediaUrl === "string") {
           const defaultExt = isVideo ? ".mp4" : ".png";
           const safeFilename = sanitizeFilename(item.filename, defaultExt);
-          
-          chrome.downloads.download({
+
+          // Replacement-first ordering: only cancel the original AFTER the
+          // replacement download has been accepted, so a failure while starting
+          // the replacement still leaves the paused original resumable.
+          await chrome.downloads.download({
             url: finalMediaUrl,
             filename: safeFilename.replace(/\.[^/.]+$/, "") + "_flowzero" + defaultExt,
             saveAs: false
           });
+          try { await chrome.downloads.cancel(item.id); } catch (_) {
+            // Original may have already completed (pause raced) — nothing to do.
+          }
         }
+      } else if (action.resumeOriginal) {
+        // No watermark found or processing did not clean — keep the native file.
+        console.log("[FlowZero Background] No cleaned output, resuming original download:", item.filename);
+        await chrome.downloads.resume(item.id);
       }
     } catch (err) {
       console.error("[FlowZero Background] Native download intercept failed:", err);
+      if (pausedOriginal) {
+        try { await chrome.downloads.resume(item.id); } catch (_) {}
+      }
     }
   })();
 });
