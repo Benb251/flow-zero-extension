@@ -10,6 +10,7 @@ import {
 
 test("URL Allowlist Validation - Trusted Domain", () => {
   assert.equal(isAllowedFlowMediaUrl("https://labs.google/fx/api/trpc/media"), true);
+  assert.equal(isAllowedFlowMediaUrl("https://flow.google.com/u/2/project/6c834acb-48fc-4331-a768-cac677a5a962"), true);
   assert.equal(isAllowedFlowMediaUrl("https://flow-content.google/v1/media/123"), true);
   assert.equal(isAllowedFlowMediaUrl("https://storage.googleapis.com/flow-bucket/sample.png"), true);
   assert.equal(isAllowedFlowMediaUrl("https://lh3.googleusercontent.com/abc=s2048"), true);
@@ -27,6 +28,8 @@ test("URL Allowlist Validation - Rejected URLs", () => {
 test("Download Referrer Validation - Accepted Flow Origins", () => {
   assert.equal(isAllowedFlowDownloadReferrer("https://labs.google/flow"), true);
   assert.equal(isAllowedFlowDownloadReferrer("https://labs.google/fx/editor/project123"), true);
+  assert.equal(isAllowedFlowDownloadReferrer("https://flow.google.com/"), true);
+  assert.equal(isAllowedFlowDownloadReferrer("https://flow.google.com/u/2/project/6c834acb-48fc-4331-a768-cac677a5a962"), true);
   assert.equal(isAllowedFlowDownloadReferrer("https://LABS.GOOGLE/flow"), true);
 });
 
@@ -37,7 +40,9 @@ test("Download Referrer Validation - Rejected Non-Flow & Malformed Referrers", (
   assert.equal(isAllowedFlowDownloadReferrer(undefined), false); // undefined
   assert.equal(isAllowedFlowDownloadReferrer("not-a-url"), false); // malformed
   assert.equal(isAllowedFlowDownloadReferrer("https://labs.google.attacker.example/"), false); // subdomain spoof
+  assert.equal(isAllowedFlowDownloadReferrer("https://flow.google.com.attacker.example/"), false); // subdomain spoof
   assert.equal(isAllowedFlowDownloadReferrer("https://evil-labs.google/"), false); // domain prefix spoof
+  assert.equal(isAllowedFlowDownloadReferrer("https://evil-flow.google.com/"), false); // subdomain, not exact host
   assert.equal(isAllowedFlowDownloadReferrer("https://google.com/"), false); // other google domain
   assert.equal(isAllowedFlowDownloadReferrer("https://otherwebsite.com/gallery"), false); // third party
 });
@@ -56,6 +61,13 @@ test("Download Interception Decision - Non-Flow Referrer with Google CDN Media",
   };
   const shouldInterceptFlow = isAllowedFlowDownloadReferrer(itemFromFlow.referrer) && isAllowedFlowMediaUrl(itemFromFlow.url);
   assert.equal(shouldInterceptFlow, true);
+
+  const itemFromNewFlowUi = {
+    referrer: "https://flow.google.com/u/2/project/6c834acb-48fc-4331-a768-cac677a5a962",
+    url: "https://storage.googleapis.com/flow-bucket/photo.jpg"
+  };
+  const shouldInterceptNewFlowUi = isAllowedFlowDownloadReferrer(itemFromNewFlowUi.referrer) && isAllowedFlowMediaUrl(itemFromNewFlowUi.url);
+  assert.equal(shouldInterceptNewFlowUi, true);
 });
 
 test("Select Media Source - blob: Fallback Regression", () => {

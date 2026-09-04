@@ -69,7 +69,8 @@
                     href.startsWith("blob:") || 
                     href.includes("googleusercontent.com") || 
                     href.includes("flow-content.google") || 
-                    href.includes("labs.google");
+                    href.includes("labs.google") ||
+                    href.includes("flow.google.com");
 
     return hasDownload || isMedia;
   }
@@ -79,7 +80,7 @@
     const a = getAnchorElement(el);
     if (!a) return;
     const href = a.href;
-    const root = a.closest(".modal, [role='dialog'], .tile, [data-tile-id], [data-test-id='media-tile']") || a.parentElement?.parentElement?.parentElement || a;
+    const root = a.closest(".modal, [role='dialog'], .tile, [data-tile-id], [data-test-id='media-tile'], flow-tile-container, flow-video-tile, flow-image-tile") || a.parentElement?.parentElement?.parentElement || a;
     let hasVideoMarker = false;
     if (root && root !== document.body) {
       if (root.querySelector("video") !== null) hasVideoMarker = true;

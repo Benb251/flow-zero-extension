@@ -6,10 +6,17 @@
 (() => {
   if (window.__flowZeroContentInjected) return;
   window.__flowZeroContentInjected = true;
+  // Startup beacon: confirms the content script is actually injected on this
+  // host after manifest match-pattern changes (labs.google → flow.google.com).
+  console.log("[FlowZero] content script active on", location.host);
 
   const WRAPPER_CLASS = "flowzero-btn-wrapper";
   const PROCESSED_ATTR = "data-flowzero-injected";
-  const MEDIA_OWNER_SELECTOR = ".tile-image-container, [data-test-id='media-tile'], [data-tile-id]";
+  // labs.google legacy classes + flow.google.com custom elements (2026 UI):
+  // per-tile card = flow-tile-container (video) or flow-image-tile (image).
+  // flow-grid-tile-container is deliberately NOT matched — it may host the
+  // context menu for the whole grid and would fuse every tile into one card.
+  const MEDIA_OWNER_SELECTOR = ".tile-image-container, [data-test-id='media-tile'], [data-tile-id], flow-tile-container, flow-video-tile, flow-image-tile";
 
   let isExtensionEnabled = false;
   let userFlowTier = "FREE";
@@ -151,7 +158,12 @@
         position: absolute;
         top: 10px;
         right: 120px;
-        z-index: 99999;
+        /* Max int32: the wrapper lives INSIDE the card's own stacking
+           context, where native hover/click overlay layers of the flow.google
+           UI can sit above a plain 99999. Clicks must land on the button,
+           not fall through to the media preview handler. */
+        z-index: 2147483647;
+        pointer-events: auto;
         display: inline-flex;
         flex-direction: column;
         align-items: flex-end;
@@ -187,6 +199,7 @@
         border-radius: 10px;
         cursor: pointer;
         box-shadow: none;
+        pointer-events: auto;
         transition: background 0.15s ease, transform 0.15s ease;
       }
 
@@ -660,6 +673,12 @@
 
   async function executeDownload(btn, targetContainer, quality = "1k") {
     const resKey = quality === "auto" ? "1k" : quality.toLowerCase();
+    if (resKey === "1080p") {
+      // 1080p watermark removal is disabled: the restore quality on 1080p
+      // renders does not meet the bar yet — only 720p is offered for video.
+      showToast("1080p hiện không khả dụng — vui lòng chọn 720p", "warning", 3500);
+      return;
+    }
     const rawUrl = getImageUrl(targetContainer);
     if (!rawUrl) {
       showToast("Khởi tạo thất bại: Không tìm thấy liên kết", "error");
@@ -671,7 +690,13 @@
       const isVideoBtn = resKey === "720p" || resKey === "1080p";
       const isVideo = isVideoBtn || (rawUrl && rawUrl.includes(".mp4"));
 
-      if (["2k", "4k", "720p", "1080p"].includes(resKey)) {
+      // All image qualities (1K/2K/4K) route through Flow's native download
+      // menu on flow.google.com: the new CDN URL format no longer honors the
+      // legacy `=w1024` suffix rewrite, so a direct fetch silently returns the
+      // 512px preview instead of the requested resolution. The native menu is
+      // the only reliable path to full-resolution assets; the direct fetch
+      // below stays as fallback when the menu cannot be found.
+      if (["1k", "2k", "4k", "720p", "1080p"].includes(resKey)) {
         if (isVideo) window._flowZeroPendingVideo = true;
         const menuTriggered = await triggerFlowNativeDownload(targetContainer, resKey);
         if (menuTriggered) {
@@ -969,7 +994,6 @@
         <button class="flowzero-menu-item" data-quality="4k">4K</button>
         <div style="height: 1px; background: rgba(255,255,255,0.2); margin: 4px 2px;"></div>
         <button class="flowzero-menu-item" data-quality="720p">720p</button>
-        <button class="flowzero-menu-item" data-quality="1080p">1080p</button>
       </div>
       <button class="flowzero-main-btn" title="Tải hình ảnh/video không watermark">
         <svg class="flowzero-logo-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -983,6 +1007,15 @@
     wrapper.querySelectorAll(".flowzero-menu-item").forEach(item => {
       item.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); executeDownload(mainBtn, container, item.getAttribute("data-quality")); });
     });
+
+    // Shield the native tile handlers from pointer activity on the wrapper:
+    // the flow.google.com UI opens media previews on pointerdown/mousedown,
+    // which fire BEFORE our click handler — without this, pressing the
+    // FlowZero button opens the media preview (feels like clicking the tile).
+    // stopPropagation only (NOT preventDefault) so button clicks still work.
+    for (const type of ["pointerdown", "pointerup", "pointerenter", "pointerleave", "mousedown", "mouseup", "touchstart", "touchend", "contextmenu"]) {
+      wrapper.addEventListener(type, (e) => e.stopPropagation());
+    }
 
     container.appendChild(wrapper);
     positionFlowZeroWrapper(container, wrapper);
