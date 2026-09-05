@@ -8,7 +8,7 @@
 
 **Tiện ích Chrome giúp tải và xử lý watermark của ảnh/video từ Google Flow ngay trong trình duyệt.**
 
-[![Release](https://img.shields.io/badge/Release-v1.3.1-22c55e?style=for-the-badge)](https://github.com/Benb251/flow-zero-extension/releases/tag/v1.3.1)
+[![Release](https://img.shields.io/badge/Release-v1.4.0-22c55e?style=for-the-badge)](https://github.com/Benb251/flow-zero-extension/releases/tag/v1.4.0)
 ![Chrome](https://img.shields.io/badge/Chrome-116%2B-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white)
 ![Manifest](https://img.shields.io/badge/Manifest-V3-34A853?style=for-the-badge)
 ![Local Processing](https://img.shields.io/badge/Processing-Local-111827?style=for-the-badge)
@@ -25,18 +25,18 @@
 
 ## ✨ Giới thiệu
 
-**FlowZero** tích hợp trực tiếp vào giao diện **Google Flow (`labs.google`)**, cho phép chọn chất lượng và tải media với quy trình xử lý watermark tự động.
+**FlowZero** tích hợp trực tiếp vào giao diện **Google Flow (`flow.google.com`)**, cho phép chọn chất lượng và tải media với quy trình xử lý watermark tự động.
 
 Ảnh và video được xử lý **cục bộ trong trình duyệt của người dùng**. FlowZero không cần máy chủ riêng để nhận và xử lý file media.
 
-Phiên bản stable hiện tại của repository là **`v1.3.1`**.
+Phiên bản stable hiện tại của repository là **`v1.4.0`**.
 
 ## 🚀 Tính năng chính
 
 - 🖼️ **Xử lý watermark ảnh** trực tiếp trong trình duyệt.
 - 🎬 **Xử lý watermark video** bằng WebCodecs.
 - 📐 Hỗ trợ luồng tải ảnh **1K / 2K**, và **4K** khi tài khoản Google Flow thực sự có capability tương ứng.
-- 🎞️ Tự động chọn đúng video **720p / 1080p** trong menu native của Google Flow.
+- 🎞️ Tự động chọn đúng video **720p** trong menu native của Google Flow.
 - 🔊 **Giữ lại audio gốc** khi video pipeline và codec hỗ trợ.
 - ✨ Nút FlowZero được đặt trong khu vực action phía trên của media card để hòa hợp hơn với giao diện Google Flow.
 - 🛡️ Download interception được giới hạn vào luồng xuất phát từ **Google Flow**, tránh ảnh hưởng tới download trên website khác.
@@ -78,7 +78,7 @@ Sau đó mở `chrome://extensions` → bật **Developer mode** → **Load unpa
 3. Di chuột vào media để hiện action **FlowZero**.
 4. Chọn chất lượng phù hợp:
    - Ảnh: `1K`, `2K`, và `4K` khi tài khoản hỗ trợ.
-   - Video: `720p` hoặc `1080p`.
+   - Video: `720p`.
 5. FlowZero lấy media từ luồng download của Google Flow và xử lý watermark cục bộ.
 6. File hoàn tất được lưu về máy thông qua Chrome Downloads.
 
@@ -139,7 +139,7 @@ FlowZero được thiết kế theo hướng **local-first**:
 |---|---|
 | Browser | Google Chrome **116+** |
 | Extension platform | Manifest V3 |
-| Website | Google Flow / `labs.google` |
+| Website | Google Flow / `flow.google.com` |
 | Video pipeline | WebCodecs |
 | Recommended | Hardware acceleration bật |
 
@@ -201,13 +201,13 @@ flow-zero-extension/
 
 ## 📦 Release hiện tại
 
-**Stable:** [`v1.3.1`](https://github.com/Benb251/flow-zero-extension/releases/tag/v1.3.1)
+**Stable:** [`v1.4.0`](https://github.com/Benb251/flow-zero-extension/releases/tag/v1.4.0)
 
 Release asset:
 
 ```text
-FlowZero-ChromeWebStore-v1.3.1.zip
-SHA256: 9B36DAE6C4613443D26CDCB9A2C782ECCC38523DF75386268C3318158B87E56C
+FlowZero-ChromeWebStore-v1.4.0.zip
+SHA256: 3D199CC026FA6A79D448B0372EB187D5006B66F2EAE4A54EBB3ADDB825EAC35D
 ```
 
 Xem toàn bộ lịch sử phát hành tại [**GitHub Releases**](https://github.com/Benb251/flow-zero-extension/releases).
