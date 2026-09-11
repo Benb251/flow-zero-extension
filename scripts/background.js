@@ -9,11 +9,55 @@ import {
   sanitizeFilename,
   detectMediaType,
   selectMediaSource,
+  isVerifiedCleanOutput,
   planNativeDownloadAction
 } from "../lib/flowzero-utils.js";
 
 const OFFSCREEN_DOCUMENT_PATH = "scripts/offscreen.html";
+const IMAGE_PROCESS_TIMEOUT_MS = 60_000;
+const VIDEO_PROCESS_TIMEOUT_MS = 10 * 60_000;
+const MEDIA_FETCH_TIMEOUT_MS = 45_000;
 let creatingOffscreenDocument = null;
+
+function withTimeout(promise, timeoutMs, label) {
+  let timer = null;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs);
+    })
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = MEDIA_FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err?.name === "AbortError") throw new Error("Media fetch timed out");
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function discardNativeDownload(downloadId) {
+  try { await chrome.downloads.cancel(downloadId); } catch (_) {}
+
+  // If pause/cancel raced with a very small file that already completed,
+  // remove the file from disk as the final fail-closed guard.
+  try {
+    await chrome.downloads.removeFile(downloadId);
+    return;
+  } catch (_) {}
+
+  // Give Chrome one short turn to settle a just-cancelled download, then retry.
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  try { await chrome.downloads.removeFile(downloadId); } catch (_) {}
+}
 
 // Ensure Offscreen Document is active for media operations (Chrome 116+ getContexts)
 async function ensureOffscreenDocument() {
@@ -98,7 +142,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // For images (or fallback mode), if trusted remote URL is present, fetch and build DataURL for Image pipeline
         if (!isVideoAction && targetRemoteUrl) {
           try {
-            const resp = await fetch(targetRemoteUrl, { cache: "no-store" });
+            const resp = await fetchWithTimeout(targetRemoteUrl, { cache: "no-store" });
             if (resp.ok) {
               const blob = await resp.blob();
               inputDataUrl = await blobToDataUrl(blob);
@@ -115,7 +159,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         if (isVideoAction) {
           // Pass remote HTTP(S) URL directly to offscreen (bypassing background Base64 conversion for trusted video)
-          offscreenResult = await chrome.runtime.sendMessage({
+          offscreenResult = await withTimeout(chrome.runtime.sendMessage({
             target: "offscreen",
             action: "processVideoWatermark",
             sourceUrl: targetRemoteUrl,
@@ -123,46 +167,49 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             dataUrl: inputDataUrl,
             taskId,
             originTabId
-          });
+          }), VIDEO_PROCESS_TIMEOUT_MS, "Video watermark processing");
         } else {
-          offscreenResult = await chrome.runtime.sendMessage({
+          offscreenResult = await withTimeout(chrome.runtime.sendMessage({
             target: "offscreen",
             action: "processWatermark",
             dataUrl: inputDataUrl,
             mime,
             originTabId
-          });
+          }), IMAGE_PROCESS_TIMEOUT_MS, "Image watermark processing");
         }
 
         if (!offscreenResult || !offscreenResult.success) {
           throw new Error(offscreenResult?.error || "Offscreen processing failed");
         }
 
-        const finalMediaUrl = offscreenResult.cleanDataUrl || offscreenResult.passthroughUrl || inputDataUrl;
-        if (!finalMediaUrl || typeof finalMediaUrl !== "string") {
-          throw new Error("No valid media URL available for download");
-        }
-
         if (message.action === "cleanWatermark") {
           sendResponse({
             success: true,
             cleaned: offscreenResult.cleaned,
-            dataUrl: finalMediaUrl,
+            dataUrl: isVerifiedCleanOutput(offscreenResult) ? offscreenResult.cleanDataUrl : null,
+            reason: offscreenResult.reason,
             stats: offscreenResult.stats
           });
           return;
         }
 
+        if (!isVerifiedCleanOutput(offscreenResult)) {
+          sendResponse({
+            success: false,
+            cleaned: false,
+            error: "Watermark removal was not verified; download blocked",
+            reason: offscreenResult.reason || "clean_output_missing"
+          });
+          return;
+        }
+
+        const finalMediaUrl = offscreenResult.cleanDataUrl;
+
         // Trigger Chrome Download
         const defaultExt = isVideoAction ? ".mp4" : ".png";
         const sanitizedFilename = sanitizeFilename(filename, defaultExt);
 
-        let outputFilename = sanitizedFilename;
-        if (!isVideoAction && offscreenResult.cleaned !== true) {
-          const extMatch = outputFilename.match(/(\.[^./]+)$/);
-          const ext = extMatch ? extMatch[1] : defaultExt;
-          outputFilename = outputFilename.replace(/\.[^/.]+$/, "") + "_logo_not_found" + ext;
-        }
+        const outputFilename = sanitizedFilename;
 
         const downloadId = await chrome.downloads.download({
           url: finalMediaUrl,
@@ -197,20 +244,29 @@ chrome.downloads.onCreated.addListener(async (item) => {
   const state = await chrome.storage.local.get(["flowzero_enabled"]);
   if (state.flowzero_enabled === false) return;
 
-  if (item.url.startsWith("data:") || item.url.startsWith("blob:") || item.url.startsWith("chrome-extension:")) return;
+  if (item.url.startsWith("chrome-extension:")) return;
 
   // Keep the v1.3.1 Flow-origin scope guard (exact host check, not just prefix).
   if (!isAllowedFlowDownloadReferrer(item.referrer)) return;
 
   const targetUrl = item.finalUrl || item.url;
+
+  // A page-owned blob URL cannot be fetched from the MV3 service worker. If
+  // one escapes the MAIN-world interceptor, fail closed rather than allowing
+  // an unverified file to complete.
+  if (targetUrl.startsWith("blob:")) {
+    console.warn("[FlowZero Background] Blocking unprocessable Flow blob download.");
+    await discardNativeDownload(item.id);
+    return;
+  }
+
   if (!isAllowedFlowMediaUrl(targetUrl)) return;
 
   console.log("[FlowZero Background] Intercepted native download:", targetUrl);
 
-  // Failure-safe download (V8 plan Phase 4): pause instead of canceling. If
-  // processing succeeds, cancel the original and download the cleaned file; if
-  // no watermark is found or processing throws, resume the original so the
-  // user never loses the native file.
+  // Fail-closed download lifecycle: pause the original while processing. Only
+  // a verified clean output may replace it. Any failure/no-detection path
+  // discards the original so a dirty file cannot leak into Downloads.
   (async () => {
     let pausedOriginal = false;
     try {
@@ -218,7 +274,10 @@ chrome.downloads.onCreated.addListener(async (item) => {
         await chrome.downloads.pause(item.id);
         pausedOriginal = true;
       } catch (_) {
-        // Pause may fail if the download already completed — process anyway.
+        // If pausing races or is unsupported, remove/cancel the original before
+        // entering a potentially long processing step. This closes the window
+        // where a small dirty file could finish and survive a worker restart.
+        await discardNativeDownload(item.id);
       }
 
       await ensureOffscreenDocument();
@@ -230,34 +289,33 @@ chrome.downloads.onCreated.addListener(async (item) => {
 
       if (isVideo) {
         // Direct HTTP(S) video branch: pass sourceUrl directly to Offscreen without pre-fetching or Base64 encoding!
-        offscreenResult = await chrome.runtime.sendMessage({
+        offscreenResult = await withTimeout(chrome.runtime.sendMessage({
           target: "offscreen",
           action: "processVideoWatermark",
           sourceUrl: targetUrl,
           taskId: "background_intercept_" + Date.now()
-        });
+        }), VIDEO_PROCESS_TIMEOUT_MS, "Intercepted video watermark processing");
       } else {
         // Image branch: fetch and convert to DataURL for canvas processing
-        const res = await fetch(targetUrl);
+        const res = await fetchWithTimeout(targetUrl, { cache: "no-store" });
         if (!res.ok) throw new Error("HTTP " + res.status);
         const blob = await res.blob();
         const dataUrl = await blobToDataUrl(blob);
 
-        offscreenResult = await chrome.runtime.sendMessage({
+        offscreenResult = await withTimeout(chrome.runtime.sendMessage({
           target: "offscreen",
           action: "processWatermark",
           dataUrl: dataUrl,
           sourceUrl: targetUrl,
           mime: blob.type,
           taskId: "background_intercept_" + Date.now()
-        });
+        }), IMAGE_PROCESS_TIMEOUT_MS, "Intercepted image watermark processing");
       }
 
-      // V8 plan Phase 4: derive the lifecycle decision from the result contract.
-      // cleaned=true → replace the native file; anything else → keep/resume it.
+      // Only cleaned=true + a locally produced media DataURL is accepted.
       const action = planNativeDownloadAction(offscreenResult, { pausedOriginal });
       if (action.downloadReplacement) {
-        const finalMediaUrl = offscreenResult.cleanDataUrl || offscreenResult.passthroughUrl || targetUrl;
+        const finalMediaUrl = offscreenResult.cleanDataUrl;
         if (finalMediaUrl && typeof finalMediaUrl === "string") {
           const defaultExt = isVideo ? ".mp4" : ".png";
           const safeFilename = sanitizeFilename(item.filename, defaultExt);
@@ -267,23 +325,21 @@ chrome.downloads.onCreated.addListener(async (item) => {
           // the replacement still leaves the paused original resumable.
           await chrome.downloads.download({
             url: finalMediaUrl,
-            filename: safeFilename.replace(/\.[^/.]+$/, "") + "_flowzero" + defaultExt,
+            // Preserve Google Flow's native filename exactly (after sanitizing),
+            // e.g. a_dog_2K_20260911095715.png. The watermark-removal step must
+            // not rewrite a correct Flow filename or append a FlowZero suffix.
+            filename: safeFilename,
             saveAs: false
           });
-          try { await chrome.downloads.cancel(item.id); } catch (_) {
-            // Original may have already completed (pause raced) — nothing to do.
-          }
+          await discardNativeDownload(item.id);
         }
-      } else if (action.resumeOriginal) {
-        // No watermark found or processing did not clean — keep the native file.
-        console.log("[FlowZero Background] No cleaned output, resuming original download:", item.filename);
-        await chrome.downloads.resume(item.id);
+      } else if (action.discardOriginal) {
+        console.warn("[FlowZero Background] Clean output not verified; blocking original download:", item.filename);
+        await discardNativeDownload(item.id);
       }
     } catch (err) {
       console.error("[FlowZero Background] Native download intercept failed:", err);
-      if (pausedOriginal) {
-        try { await chrome.downloads.resume(item.id); } catch (_) {}
-      }
+      await discardNativeDownload(item.id);
     }
   })();
 });

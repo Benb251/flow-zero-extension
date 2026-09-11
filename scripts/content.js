@@ -535,6 +535,165 @@
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  function isVisibleMenuElement(el) {
+    if (!(el instanceof Element)) return false;
+    const rect = el.getBoundingClientRect();
+    const style = window.getComputedStyle(el);
+    return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+  }
+
+  function getNormalizedMenuText(el) {
+    return (el?.textContent || "").replace(/\s+/g, " ").trim();
+  }
+
+  const FLOW_MENU_ACTION_SELECTOR = [
+    '[role="menuitem"]',
+    'button',
+    '[tabindex]',
+    '[aria-haspopup="menu"]',
+    '.mat-mdc-menu-item',
+    '.mat-menu-item',
+    '[class*="menu-item"]',
+    '[class*="menuitem"]'
+  ].join(', ');
+
+  function getMenuActionElement(labelEl, root) {
+    if (!(labelEl instanceof Element)) return null;
+
+    const labelText = getNormalizedMenuText(labelEl);
+    let current = labelEl;
+    let sameTextAncestor = labelEl;
+
+    while (current && current !== root) {
+      if (current.matches?.(FLOW_MENU_ACTION_SELECTOR)) return current;
+      if (getNormalizedMenuText(current) === labelText) sameTextAncestor = current;
+      current = current.parentElement;
+    }
+
+    // Flow sometimes puts the Angular click/hover handler on a wrapper that has
+    // no role/tabindex. Prefer the outermost wrapper whose text is still exactly
+    // the requested label so events reach that handler instead of only the span.
+    return sameTextAncestor;
+  }
+
+  function activateFlowMenuItem(el) {
+    if (!(el instanceof Element)) return false;
+
+    const rect = el.getBoundingClientRect();
+    const clientX = rect.left + rect.width / 2;
+    const clientY = rect.top + rect.height / 2;
+    const pointerOpts = {
+      bubbles: true,
+      cancelable: true,
+      clientX,
+      clientY,
+      pointerId: 1,
+      pointerType: "mouse"
+    };
+
+    // Angular Material has used both hover-open and click-open menu triggers.
+    // Send the normal pointer hover sequence, focus the action host, then click.
+    for (const type of ["pointerover", "pointerenter", "pointermove"]) {
+      el.dispatchEvent(new PointerEvent(type, pointerOpts));
+    }
+    for (const type of ["mouseover", "mouseenter", "mousemove"]) {
+      el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY }));
+    }
+    try { el.focus?.({ preventScroll: true }); } catch (_) { el.focus?.(); }
+    el.click();
+    return true;
+  }
+
+  // Flow's current Angular menu renders the visible label as
+  // <span class="label">...</span>. The clickable ancestor no longer reliably
+  // exposes role="menuitem", button, or tabindex, so include label nodes and
+  // other menu-like ancestors instead of depending on one DOM shape.
+  function findMenuTextElement(root, predicate) {
+    if (!(root instanceof Element)) return null;
+
+    const candidates = root.querySelectorAll([
+      FLOW_MENU_ACTION_SELECTOR,
+      '.label',
+      'span',
+      'div'
+    ].join(', '));
+
+    let bestMatch = null;
+    let bestTextLength = Infinity;
+
+    for (const item of candidates) {
+      if (!isVisibleMenuElement(item)) continue;
+      const text = getNormalizedMenuText(item);
+      if (!text || !predicate(text, item)) continue;
+
+      // Nested Angular wrappers often contain the concatenated text of every
+      // child item. Prefer the smallest matching text node/element so "2K"
+      // resolves to the 2K action instead of the whole submenu container.
+      if (text.length < bestTextLength) {
+        bestMatch = item;
+        bestTextLength = text.length;
+      }
+    }
+
+    return bestMatch;
+  }
+
+  function findMenuAction(root, predicate) {
+    const labelEl = findMenuTextElement(root, predicate);
+    if (!labelEl) return null;
+    return {
+      labelEl,
+      actionEl: getMenuActionElement(labelEl, root) || labelEl
+    };
+  }
+
+  function getVisibleFlowMenus() {
+    return Array.from(document.querySelectorAll([
+      '[role="menu"]',
+      '[data-radix-menu-content]',
+      '.submenu',
+      '[id^="mat-menu-panel-"]',
+      '.mat-mdc-menu-panel'
+    ].join(', '))).filter(isVisibleMenuElement);
+  }
+
+  function findResolutionMenu(resUpper, excludedMenu = null) {
+    let samePanelFallback = null;
+    for (const menu of getVisibleFlowMenus()) {
+      const match = findMenuAction(menu, (text) => text.toUpperCase().startsWith(resUpper));
+      if (!match) continue;
+      if (menu !== excludedMenu) return menu;
+      samePanelFallback = menu;
+    }
+    return samePanelFallback;
+  }
+
+  function findNativeMenuTrigger(container) {
+    if (!(container instanceof Element)) return null;
+    const candidates = container.querySelectorAll([
+      'button[aria-label*="more options" i]',
+      '[role="button"][aria-label*="more options" i]',
+      'button[title*="more options" i]',
+      'button[aria-haspopup="menu"]'
+    ].join(', '));
+
+    for (const candidate of candidates) {
+      if (candidate.closest(`.${WRAPPER_CLASS}`)) continue;
+      if (isVisibleMenuElement(candidate)) return candidate;
+    }
+    return null;
+  }
+
+  function findDownloadContextMenu() {
+    for (const menu of getVisibleFlowMenus()) {
+      if (findMenuAction(menu, (text) => {
+        const normalized = text.toLowerCase();
+        return normalized === "download" || normalized === "tải xuống" || normalized === "tải về";
+      })) return menu;
+    }
+    return null;
+  }
+
   async function triggerFlowNativeDownload(container, resolution = "2k") {
     const resUpper = resolution.toUpperCase();
     console.log("[FlowZero] Requested native resolution:", resUpper);
@@ -545,28 +704,28 @@
     imgEl.scrollIntoView({ behavior: "instant", block: "center" });
     await sleep(100);
 
-    const rect = imgEl.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-
-    imgEl.dispatchEvent(new MouseEvent("contextmenu", {
-      bubbles: true,
-      cancelable: true,
-      clientX: cx,
-      clientY: cy,
-      button: 2
-    }));
+    // Prefer Flow's own More-options trigger. It is more stable than fabricating
+    // a right-click and makes Angular create the same menu path as a real user.
+    const nativeMenuTrigger = findNativeMenuTrigger(container);
+    if (nativeMenuTrigger) {
+      nativeMenuTrigger.click();
+    } else {
+      const rect = imgEl.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      imgEl.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: cx,
+        clientY: cy,
+        button: 2
+      }));
+    }
 
     let contextMenu = null;
     for (let i = 0; i < 15; i++) {
       await sleep(120);
-      const menus = document.querySelectorAll('[role="menu"], [data-radix-menu-content], [aria-label*="menu" i], .context-menu');
-      for (const m of menus) {
-        if (m.offsetWidth > 0 && m.offsetHeight > 0) {
-          contextMenu = m;
-          break;
-        }
-      }
+      contextMenu = findDownloadContextMenu();
       if (contextMenu) break;
     }
 
@@ -576,58 +735,41 @@
     }
     await sleep(100);
 
-    const menuItems = contextMenu.querySelectorAll('[role="menuitem"], button, div[tabindex]');
-    let downloadItem = null;
-
-    for (const item of menuItems) {
-      const text = item.textContent?.toLowerCase() || "";
-      if (text.includes("download") || text.includes("tải xuống") || text.includes("tải về")) {
-        downloadItem = item;
-        break;
-      }
-    }
+    const downloadItem = findMenuAction(contextMenu, (text) => {
+      const normalized = text.toLowerCase();
+      return normalized === "download" || normalized === "tải xuống" || normalized === "tải về";
+    });
 
     if (!downloadItem) {
       console.warn("[FlowZero] Download menu item not found in context menu.");
       return false;
     }
 
-    const dlRect = downloadItem.getBoundingClientRect();
-    const dlCx = dlRect.left + dlRect.width / 2;
-    const dlCy = dlRect.top + dlRect.height / 2;
-
-    const pointerOpts = { bubbles: true, cancelable: true, clientX: dlCx, clientY: dlCy, pointerId: 1, pointerType: "mouse" };
-    downloadItem.dispatchEvent(new PointerEvent("pointerover", pointerOpts));
-    downloadItem.dispatchEvent(new PointerEvent("pointerenter", pointerOpts));
-    downloadItem.dispatchEvent(new PointerEvent("pointermove", pointerOpts));
-    downloadItem.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, clientX: dlCx, clientY: dlCy }));
-    downloadItem.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true, clientX: dlCx, clientY: dlCy }));
-    downloadItem.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: dlCx, clientY: dlCy }));
+    // Activate the real menu-action host rather than only the visible <span>
+    // label. On current Flow this opens 1K / 2K / 4K reliably.
+    activateFlowMenuItem(downloadItem.actionEl);
 
     let subMenu = null;
+    const isUploadedImage = /\bUploaded image\b/i.test(getNormalizedMenuText(container));
     for (let i = 0; i < 15; i++) {
       await sleep(120);
-      const allMenus = document.querySelectorAll('[role="menu"], [data-radix-menu-content], .submenu');
-      for (const m of allMenus) {
-        if (m !== contextMenu && m.offsetWidth > 0 && m.offsetHeight > 0) {
-          subMenu = m;
-          break;
-        }
-      }
+      subMenu = findResolutionMenu(resUpper, contextMenu);
       if (subMenu) break;
+
+      // Uploads currently download directly when "Download" is clicked and do
+      // not show a resolution submenu. If the source menu closed, the native
+      // download was accepted; return success so executeDownload does not start
+      // the direct-fetch fallback as a duplicate download.
+      if (isUploadedImage && !isVisibleMenuElement(contextMenu)) {
+        console.log("[FlowZero] Native Download action triggered directly (no resolution submenu).");
+        return true;
+      }
     }
 
     if (!subMenu) {
-      downloadItem.dispatchEvent(new FocusEvent("focus", { bubbles: true }));
-      downloadItem.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }));
+      downloadItem.actionEl.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }));
       await sleep(150);
-      const allMenus = document.querySelectorAll('[role="menu"], [data-radix-menu-content], .submenu');
-      for (const m of allMenus) {
-        if (m !== contextMenu && m.offsetWidth > 0 && m.offsetHeight > 0) {
-          subMenu = m;
-          break;
-        }
-      }
+      subMenu = findResolutionMenu(resUpper, contextMenu);
     }
 
     if (!subMenu) {
@@ -638,36 +780,23 @@
     console.log("[FlowZero] Resolution submenu found");
     await sleep(150);
 
-    let subItems = subMenu.querySelectorAll('[role="menuitem"]');
-    if (!subItems || subItems.length === 0) {
-      subItems = subMenu.querySelectorAll('button, div[tabindex]');
-    }
-
-    let targetSubItem = null;
-
-    for (const item of subItems) {
-      const rawText = item.textContent || "";
-      const normalized = rawText.replace(/\s+/g, " ").trim().toUpperCase();
-
-      if (normalized.startsWith(resUpper)) {
-        if (item.getAttribute("aria-disabled") === "true" || item.hasAttribute("disabled")) {
-          console.warn(`[FlowZero] Option ${resUpper} is disabled in Flow.`);
-          showToast(`Tùy chọn ${resUpper} không khả dụng cho tài khoản hiện tại`, "warning", 3500);
-          return false;
-        }
-        targetSubItem = item;
-        break;
-      }
-    }
+    const targetSubItem = findMenuAction(subMenu, (text) => text.toUpperCase().startsWith(resUpper));
 
     if (!targetSubItem) {
-      console.warn(`[FlowZero] Submenu item for ${resUpper} not found. Available items:`, Array.from(subItems).map(i => i.textContent?.replace(/\s+/g, " ").trim()));
+      console.warn(`[FlowZero] Submenu item for ${resUpper} not found. Available text:`, getNormalizedMenuText(subMenu));
       return false;
     }
 
-    const clickedText = targetSubItem.textContent?.replace(/\s+/g, " ").trim().toUpperCase();
+    const disabledHost = targetSubItem.actionEl.closest('[aria-disabled="true"], [disabled], .mat-mdc-menu-item[aria-disabled="true"], .mat-menu-item[aria-disabled="true"]');
+    if (disabledHost) {
+      console.warn(`[FlowZero] Option ${resUpper} is disabled in Flow.`);
+      showToast(`Tùy chọn ${resUpper} không khả dụng cho tài khoản hiện tại`, "warning", 3500);
+      return false;
+    }
+
+    const clickedText = getNormalizedMenuText(targetSubItem.labelEl).toUpperCase();
     console.log("[FlowZero] Clicking native resolution:", clickedText);
-    targetSubItem.click();
+    activateFlowMenuItem(targetSubItem.actionEl);
     return true;
   }
 
@@ -704,9 +833,25 @@
           return;
         }
         window._flowZeroPendingVideo = false;
+
+        // Never silently substitute the 512px preview for a requested image
+        // resolution. If native Flow selection fails, surface the failure so a
+        // 2K click cannot produce a misleading 512x512 file.
+        if (["1k", "2k", "4k"].includes(resKey)) {
+          showToast(`Không thể chọn ${resKey.toUpperCase()} trong menu Download của Flow`, "error", 4500);
+          return;
+        }
       }
 
-      const ext = isVideo ? "mp4" : "png";
+      // Image downloads must have returned through Flow's native menu above so
+      // Flow can supply its canonical prompt/quality/timestamp filename. Never
+      // synthesize a flowzero_<quality>_<epoch>.png fallback for images.
+      if (!isVideo) {
+        showToast("Không lấy được tên/tệp ảnh native từ Google Flow", "error", 4500);
+        return;
+      }
+
+      const ext = "mp4";
       const filename = `flowzero_${resKey}_${Date.now()}.${ext}`;
       
       let dataUrl = undefined;

@@ -5,7 +5,8 @@ import {
   isAllowedFlowDownloadReferrer,
   sanitizeFilename,
   detectMediaType,
-  selectMediaSource
+  selectMediaSource,
+  isVerifiedCleanOutput
 } from "../lib/flowzero-utils.js";
 
 test("URL Allowlist Validation - Trusted Domain", () => {
@@ -90,7 +91,7 @@ test("Select Media Source - Trusted HTTP Preference & Fallback Preservation", ()
   assert.equal(result.fallbackDataUrl, videoUrl);
 });
 
-test("Direct HTTP Video Passthrough Resolution (applied=false)", () => {
+test("Direct HTTP Video Passthrough is not accepted as verified clean output", () => {
   const offscreenResult = {
     success: true,
     cleaned: false,
@@ -99,8 +100,7 @@ test("Direct HTTP Video Passthrough Resolution (applied=false)", () => {
     reason: "watermark_not_applied"
   };
 
-  const finalMediaUrl = offscreenResult.cleanDataUrl || offscreenResult.passthroughUrl || "fallback";
-  assert.equal(finalMediaUrl, "https://flow-content.google/v1/media/12345");
+  assert.equal(isVerifiedCleanOutput(offscreenResult), false);
 });
 
 test("Self-download Guard (byExtensionId)", () => {
@@ -117,6 +117,7 @@ test("Self-download Guard (byExtensionId)", () => {
 test("Filename Sanitization", () => {
   assert.equal(sanitizeFilename("file:name/with*invalid?chars.png"), "file_name_with_invalid_chars.png");
   assert.equal(sanitizeFilename("normal_file.mp4"), "normal_file.mp4");
+  assert.equal(sanitizeFilename("a_dog_2K_20260911095715.png"), "a_dog_2K_20260911095715.png");
 });
 
 test("Media Type Detection - Suffix and MIME Metadata", () => {

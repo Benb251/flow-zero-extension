@@ -18,6 +18,9 @@ const MARGIN = 78;                     // WATERMARK_PROFILES.image["1024x1024"].
 const ANCHOR = { x: W - 48 - MARGIN, y: H - 48 - MARGIN }; // (898, 898)
 const NCC_THRESHOLD = 0.40;            // strict gate (V8)
 const ROBUST_NCC_THRESHOLD = 0.58;    // robust gate (V8)
+const EXACT_PROFILE_NCC_THRESHOLD = 0.45;
+const EXACT_PROFILE_FALLBACK_THRESHOLD = 0.68;
+const EXACT_PROFILE_TRUST_FLOOR = 0.12;
 
 // Deterministic seeded PRNG (mulberry32).
 function mulberry32(seed) {
@@ -77,7 +80,7 @@ test("V8 detector — full-strength star on flat background is detected via the 
   assert.equal(result.clean, true);
   assert.equal(result.variantId, "v8-detector-v7-restore");
   assert.equal(result.mode, "strict");
-  assert.ok(Math.abs(result.threshold - NCC_THRESHOLD) < 1e-9,
+  assert.ok(Math.abs(result.threshold - EXACT_PROFILE_NCC_THRESHOLD) < 1e-9,
     `strict path must report the strict threshold, got ${result.threshold}`);
   assert.ok(Math.abs(result.pos.x - ANCHOR.x) <= 3, `pos.x ${result.pos.x} should be ~${ANCHOR.x}`);
   assert.ok(Math.abs(result.pos.y - ANCHOR.y) <= 3, `pos.y ${result.pos.y} should be ~${ANCHOR.y}`);
@@ -116,13 +119,70 @@ test("V8 detector — F1 regression: strict hit in the 0.45–0.58 band must be 
 
   const result = await Remover.process(calibrated.img);
 
-  // This fails before the F1 fix (seed re-gated at hardcoded 0.58) and must
-  // pass after (seed re-gated at its own accepted threshold = 0.40).
+  // A known export size still accepts a moderate but valid deterministic hit;
+  // it just uses the safer exact-profile floor instead of roaming elsewhere.
   assert.equal(result.applied, true,
     `low-contrast strict detection (NCC=${calibrated.ncc.toFixed(3)}) must be accepted`);
-  assert.ok(Math.abs(result.threshold - NCC_THRESHOLD) < 1e-9);
+  assert.ok(Math.abs(result.threshold - EXACT_PROFILE_NCC_THRESHOLD) < 1e-9);
   assert.ok(Math.abs(result.pos.x - ANCHOR.x) <= 3);
   assert.ok(Math.abs(result.pos.y - ANCHOR.y) <= 3);
+});
+
+test("V8 detector — exact profile must not jump to a distant sparkle-like region", async () => {
+  const img = makeImage();
+  fill(img, 100);
+
+  // Simulate grass/flower texture producing a very strong sparkle correlation
+  // inside the broad lower-right scan, but far from the deterministic anchor.
+  const falsePos = { x: 760, y: 760 };
+  stampStar(img, mask48, falsePos.x, falsePos.y, 1.0);
+
+  const result = await Remover.process(img);
+
+  assert.equal(result.applied, false,
+    "known 1024x1024 profile must reject a strong off-anchor false positive");
+  assert.equal(result.reason, "watermark_not_found");
+  assert.equal(result.mode, "exact-bounded");
+  assert.ok(Math.abs(result.threshold - EXACT_PROFILE_FALLBACK_THRESHOLD) < 1e-9);
+});
+
+test("V8 detector — exact profile bounded fallback still recovers small anchor drift", async () => {
+  const img = makeImage();
+  fill(img, 100);
+  const drifted = { x: ANCHOR.x + 8, y: ANCHOR.y - 6 };
+  stampStar(img, mask48, drifted.x, drifted.y, 1.0);
+
+  const result = await Remover.process(img);
+
+  assert.equal(result.applied, true, "bounded fallback must recover a nearby real watermark");
+  assert.ok(Math.abs(result.pos.x - drifted.x) <= 3);
+  assert.ok(Math.abs(result.pos.y - drifted.y) <= 3);
+});
+
+test("V8 detector — exact profile weak fixed-anchor hit must not block the download path", async () => {
+  let calibrated = null;
+  for (let amp = 40; amp <= 255; amp += 4) {
+    const img = makeImage();
+    fill(img, 100);
+    stampStar(img, mask48, ANCHOR.x, ANCHOR.y, 0.30);
+    addNoise(img, amp, mulberry32(20260911));
+    const hit = Remover.locate(img, mask48);
+    if (hit && hit.ncc >= 0.14 && hit.ncc <= 0.38) {
+      calibrated = { img, ncc: hit.ncc };
+      break;
+    }
+  }
+
+  assert.ok(calibrated, "must construct a weak but plausible exact-anchor case");
+  const result = await Remover.process(calibrated.img);
+
+  assert.equal(result.applied, true,
+    `known Flow profile with weak anchor NCC=${calibrated.ncc.toFixed(3)} must still be processed`);
+  assert.equal(result.mode, "exact-anchor-trusted");
+  assert.ok(Math.abs(result.threshold - EXACT_PROFILE_TRUST_FLOOR) < 1e-9);
+  assert.equal(result.pos.x, ANCHOR.x);
+  assert.equal(result.pos.y, ANCHOR.y);
+  assert.ok(result.touched > 0);
 });
 
 test("V8 detector — diagnostics contract (typed result fields)", async () => {
@@ -153,5 +213,11 @@ test("V8 detector — diagnostics contract (typed result fields)", async () => {
   assert.equal(typeof rejected.reason, "string");
   assert.equal(typeof rejected.mode, "string");
   assert.equal(typeof rejected.threshold, "number");
-  assert.ok(rejected.threshold === NCC_THRESHOLD || rejected.threshold === ROBUST_NCC_THRESHOLD);
+  assert.ok([
+    NCC_THRESHOLD,
+    ROBUST_NCC_THRESHOLD,
+    EXACT_PROFILE_NCC_THRESHOLD,
+    EXACT_PROFILE_FALLBACK_THRESHOLD,
+    EXACT_PROFILE_TRUST_FLOOR,
+  ].includes(rejected.threshold));
 });

@@ -8,7 +8,7 @@
 
 **Tiện ích Chrome giúp tải và xử lý watermark của ảnh/video từ Google Flow ngay trong trình duyệt.**
 
-[![Release](https://img.shields.io/badge/Release-v1.4.0-22c55e?style=for-the-badge)](https://github.com/Benb251/flow-zero-extension/releases/tag/v1.4.0)
+[![Release](https://img.shields.io/badge/Release-v1.4.1-22c55e?style=for-the-badge)](https://github.com/Benb251/flow-zero-extension/releases/tag/v1.4.1)
 ![Chrome](https://img.shields.io/badge/Chrome-116%2B-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white)
 ![Manifest](https://img.shields.io/badge/Manifest-V3-34A853?style=for-the-badge)
 ![Local Processing](https://img.shields.io/badge/Processing-Local-111827?style=for-the-badge)
@@ -29,7 +29,7 @@
 
 Ảnh và video được xử lý **cục bộ trong trình duyệt của người dùng**. FlowZero không cần máy chủ riêng để nhận và xử lý file media.
 
-Phiên bản stable hiện tại của repository là **`v1.4.0`**.
+Phiên bản stable hiện tại của repository là **`v1.4.1`**.
 
 ## 🚀 Tính năng chính
 
@@ -201,13 +201,13 @@ flow-zero-extension/
 
 ## 📦 Release hiện tại
 
-**Stable:** [`v1.4.0`](https://github.com/Benb251/flow-zero-extension/releases/tag/v1.4.0)
+**Stable:** [`v1.4.1`](https://github.com/Benb251/flow-zero-extension/releases/tag/v1.4.1)
 
 Release asset:
 
 ```text
-FlowZero-ChromeWebStore-v1.4.0.zip
-SHA256: 3D199CC026FA6A79D448B0372EB187D5006B66F2EAE4A54EBB3ADDB825EAC35D
+FlowZero-ChromeWebStore-v1.4.1.zip
+SHA256: BA3F8B15668A71F0376AF52C41D3C0C42BF0579F912CD5DF5925F963CBB320BB
 ```
 
 Xem toàn bộ lịch sử phát hành tại [**GitHub Releases**](https://github.com/Benb251/flow-zero-extension/releases).
