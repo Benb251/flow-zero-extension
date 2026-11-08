@@ -128,9 +128,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         return {ok:false,error:"Batch ownership mismatch"};
       }
-      if (lease && (lease.batchId !== message.batchId || lease.tabId !== sender.tab.id))
-        return {ok:false,error:"Another batch is active or needs review"};
-      await chrome.storage.local.set({flowzero_batch_lease:{batchId:message.batchId,tabId:sender.tab.id}});
+      // Expired leases can be replaced only after a new explicit Start action.
+      // An active batch refreshes its lease before every item.
+      const expired = lease && Number.isFinite(lease.updatedAt) &&
+        Date.now()-lease.updatedAt > 20*60*1000;
+      if (lease && !expired && (lease.batchId !== message.batchId || lease.tabId !== sender.tab.id))
+        return {ok:false,error:"Another batch is active or needs review (up to 20 minutes after interruption)"};
+      await chrome.storage.local.set({flowzero_batch_lease:{batchId:message.batchId,tabId:sender.tab.id,updatedAt:Date.now()}});
       return {ok:true};
     }).then(sendResponse, err=>sendResponse({ok:false,error:String(err?.message||err)}));
     return true;
