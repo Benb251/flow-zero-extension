@@ -203,6 +203,12 @@
       for(const item of queue.items){
         if(queue.paused||pauseRequested||!enabled||project()!==queue.project)break;
         if(item.status!=="queued")continue;
+        const refreshed=await send({action:"batchAcquire",batchId:queue.id});
+        if(!refreshed?.ok) {
+          queue.paused=true;
+          item.error=refreshed?.error||"Batch lease expired";
+          await save();break;
+        }
         const card=resolve(item);
         if(!card||cardKind(card)!==item.kind||!bridge()?.source?.(card)){
           item.status="skipped";item.error="Selected card missing or changed";await save();renderPanel(true);continue;
