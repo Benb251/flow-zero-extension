@@ -120,7 +120,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (!fromFlowTab(sender)) return { ok:false, error:"Invalid Flow tab" };
       const {flowzero_batch_lease:lease,flowzero_enabled:enabled} =
         await chrome.storage.local.get(["flowzero_batch_lease","flowzero_enabled"]);
-      if (enabled === false) return {ok:false,error:"FlowZero disabled"};
       if (message.action === "batchRelease") {
         if (lease?.batchId === message.batchId && lease?.tabId === sender.tab.id) {
           await chrome.storage.local.remove("flowzero_batch_lease");
@@ -128,6 +127,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         return {ok:false,error:"Batch ownership mismatch"};
       }
+      if (enabled === false) return {ok:false,error:"FlowZero disabled"};
       // Expired leases can be replaced only after a new explicit Start action.
       // An active batch refreshes its lease before every item.
       const expired = lease && Number.isFinite(lease.updatedAt) &&
