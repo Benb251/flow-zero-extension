@@ -34,7 +34,7 @@
   }
   function css() {
     const style = document.createElement("style"); style.id="flowzero-batch-css";
-    style.textContent = \`
+    style.textContent = `
       .flowzero-batch-checkbox { position:absolute; bottom:10px; left:10px; z-index:2147483646;
         width:29px; height:29px; border-radius:8px; border:2px solid white;
         background:rgba(13,20,31,.87); color:white; cursor:pointer; display:flex;
@@ -54,7 +54,7 @@
       #flowzero-batch-panel h3 {margin:0 0 8px; font-size:15px;}
       #flowzero-batch-panel .fz-item {padding:6px 0; border-top:1px solid #334155; overflow-wrap:anywhere;}
       #flowzero-batch-panel .fz-warning {color:#fbbf24;}
-    \`;
+    `;
     document.head.appendChild(style);
   }
   function node(tag, text, handler, parent, disabled=false) {
