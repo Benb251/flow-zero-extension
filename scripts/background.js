@@ -100,8 +100,51 @@ async function blobToDataUrl(blob) {
   return `data:${blob.type || "application/octet-stream"};base64,${base64}`;
 }
 
+// Single browser-profile batch lease. A pending lease intentionally survives
+// worker suspension; the UI must explicitly resume or release it.
+let batchLeaseSerial = Promise.resolve();
+const FLOW_ORIGINS = new Set(["https://flow.google.com", "https://labs.google"]);
+const fromFlowTab = (sender) => {
+  try { return FLOW_ORIGINS.has(new URL(sender.tab?.url || "").origin); } catch (_) { return false; }
+};
+function serializedLease(fn) {
+  const result = batchLeaseSerial.then(fn, fn);
+  batchLeaseSerial = result.then(() => {}, () => {});
+  return result;
+}
+
 // Main message listener
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.action === "batchAcquire" || message?.action === "batchRelease") {
+    serializedLease(async () => {
+      if (!fromFlowTab(sender)) return { ok:false, error:"Invalid Flow tab" };
+      const {flowzero_batch_lease:lease,flowzero_enabled:enabled} =
+        await chrome.storage.local.get(["flowzero_batch_lease","flowzero_enabled"]);
+      if (enabled === false) return {ok:false,error:"FlowZero disabled"};
+      if (message.action === "batchRelease") {
+        if (lease?.batchId === message.batchId && lease?.tabId === sender.tab.id) {
+          await chrome.storage.local.remove("flowzero_batch_lease");
+          return {ok:true};
+        }
+        return {ok:false,error:"Batch ownership mismatch"};
+      }
+      if (lease && (lease.batchId !== message.batchId || lease.tabId !== sender.tab.id))
+        return {ok:false,error:"Another batch is active or needs review"};
+      await chrome.storage.local.set({flowzero_batch_lease:{batchId:message.batchId,tabId:sender.tab.id}});
+      return {ok:true};
+    }).then(sendResponse, err=>sendResponse({ok:false,error:String(err?.message||err)}));
+    return true;
+  }
+  if (message?.action === "batchDownloadStatus") {
+    (async () => {
+      if (!fromFlowTab(sender) || !Number.isInteger(message.downloadId)) return {ok:false,error:"Invalid request"};
+      const matches = await chrome.downloads.search({id:message.downloadId});
+      const item = matches[0];
+      if (!item || item.byExtensionId !== chrome.runtime.id) return {ok:false,error:"Unknown download"};
+      return {ok:true,state:item.state,error:item.error||null};
+    })().then(sendResponse,err=>sendResponse({ok:false,error:String(err?.message||err)}));
+    return true;
+  }
   // Relay progress messages directly to originating tab using originTabId
   if (message.target === "content" && message.action === "videoProgress") {
     const originTabId = message.originTabId;
@@ -128,6 +171,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       try {
         const { imageUrl, videoUrl, mediaUrl, filename = "flowzero_clean.png", mime = "image/png", taskId } = message;
+        if (message.batchAttempt) {
+          const lease = (await chrome.storage.local.get(["flowzero_batch_lease"])).flowzero_batch_lease;
+          if (!fromFlowTab(sender) || !lease || lease.batchId !== message.batchAttempt.batchId || lease.tabId !== sender.tab?.id)
+            throw new Error("Batch lease invalid");
+        }
         const originTabId = sender.tab?.id;
 
         const selection = selectMediaSource(mediaUrl, videoUrl, imageUrl);
@@ -222,6 +270,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           cleaned: offscreenResult.cleaned,
           downloadId,
           filename: outputFilename,
+          batchAttempt: message.batchAttempt || null,
           stats: offscreenResult.stats
         });
 
