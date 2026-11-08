@@ -25,7 +25,8 @@
         "https://flow.google.com/*"
       ],
       "js": [
-        "scripts/content.js"
+        "scripts/content.js",
+        "scripts/batch.js"
       ],
       "run_at": "document_start"
     },
