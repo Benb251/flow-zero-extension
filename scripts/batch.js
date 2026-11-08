@@ -11,6 +11,7 @@
   const ephemeral = new WeakMap();
   let serial = 0, mode = false, enabled = true, queue = null;
   let running = false, pauseRequested = false, toolbar = null, panel = null;
+  let imageQuality = "2k";
   let observer = null, repaintScheduled = false;
   const project = () => location.origin + location.pathname + location.search;
   const bridge = () => window.__flowZeroBatchBridge;
@@ -73,7 +74,12 @@
       if(!card.isConnected || card.getBoundingClientRect().width < 80) continue;
       if(!bridge()?.source?.(card)) continue;
       const id=identity(card), existing=Array.from(card.children).find(c=>c.classList?.contains("flowzero-batch-checkbox"));
-      if(existing){existing.textContent=selected.has(id)?"✓":"+";existing.setAttribute("aria-pressed",String(selected.has(id)));continue;}
+      if(existing){
+        const checked=selected.has(id), label=checked?"✓":"+";
+        if(existing.textContent!==label)existing.textContent=label;
+        if(existing.getAttribute("aria-pressed")!==String(checked))existing.setAttribute("aria-pressed",String(checked));
+        continue;
+      }
       const btn=document.createElement("button");btn.type="button";btn.className="flowzero-batch-checkbox";
       btn.setAttribute("aria-label","Chọn media cho Batch Download");
       btn.setAttribute("aria-pressed",String(selected.has(id)));btn.textContent=selected.has(id)?"✓":"+";
@@ -115,6 +121,16 @@
       node("span",selected.size+" / "+LIMIT+" đã chọn",null,toolbar);
       node("button","Chọn đang hiển thị",selectVisible,toolbar,running);
       node("button","Bỏ chọn",()=>{selected.clear();renderSelection();renderToolbar();},toolbar,running);
+      const quality=document.createElement("select");
+      quality.setAttribute("aria-label","Chất lượng ảnh hàng loạt");
+      for(const opt of ["1k","2k","4k"]){
+        const option=document.createElement("option"); option.value=opt;option.textContent="Ảnh "+opt.toUpperCase();
+        option.selected=imageQuality===opt;quality.appendChild(option);
+      }
+      quality.style.cssText="background:#334155;color:#fff;border-radius:6px;padding:7px";
+      quality.disabled=running||!!queue;
+      quality.addEventListener("change",()=>{imageQuality=quality.value;});
+      toolbar.appendChild(quality);
       node("button","Tải file đã chọn",start,toolbar,running||selected.size===0||!!queue);
     }
     if(queue) node("button", "Hàng đợi",()=>renderPanel(true),toolbar);
@@ -132,6 +148,8 @@
       !queue.items.some(x=>x.status==="needs_review"))
       node("button","Tiếp tục file đang chờ",resume,panel);
     if(!running) node("button","Đóng hàng đợi / chọn lại",async()=>{
+      if(queue.items.some(i=>i.status==="needs_review") &&
+         !confirm("Có tác vụ chưa rõ kết quả. Hãy kiểm tra Chrome Downloads trước khi đóng hàng đợi. Bạn đã kiểm tra?"))return;
       await send({action:"batchRelease",batchId:queue.id}); queue=null;selected.clear();
       await save();renderPanel();renderToolbar();renderSelection();
     },panel);
@@ -148,7 +166,7 @@
     // No URL or raw media data persisted. Card identity must be revalidated before each action.
     const id=uuid();
     queue={id,project:project(),paused:false,items:items.map(x=>({
-      ...x,quality:x.kind==="video"?"720p":"2k",status:"queued",attemptId:null,downloadId:null,error:null
+      ...x,quality:x.kind==="video"?"720p":imageQuality,status:"queued",attemptId:null,downloadId:null,error:null
     }))};
     await save();renderToolbar();renderPanel(true);await run();
   }
@@ -198,6 +216,7 @@
             item.status="failed";item.error="Could not select native download";await save();continue;
           }
           const result=await waitForResult(initiated.result,90000);
+          bridge()?.finish(queue.id,item.attemptId);
           if(result.uncertain){
             item.status="needs_review";item.error=result.error;queue.paused=true;await save();break;
           }
