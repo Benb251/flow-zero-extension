@@ -65,6 +65,13 @@
 
     if (event.data.type === "FLOWZERO_INTERCEPT_DOWNLOAD") {
       const { dataUrl: preloadedDataUrl, url, filename, mediaType } = event.data;
+      const batchContext = window.__flowZeroBatchPending || null;
+      if (batchContext) {
+        batchContext.intercepts++;
+        if (batchContext.intercepts > 1) {
+          batchContext.settle({success:false,uncertain:true,error:"Multiple intercepts during batch item"});
+        }
+      }
       if (url && typeof url !== "string") return;
       if (preloadedDataUrl && typeof preloadedDataUrl !== "string") return;
       if (!preloadedDataUrl && !url) return;
@@ -86,6 +93,11 @@
       if (preloadedDataUrl && preloadedDataUrl.startsWith("data:application/mp4")) isVideo = true;
       if (window._flowZeroPendingVideo) isVideo = true;
       window._flowZeroPendingVideo = false;
+      if (batchContext && ((batchContext.kind === "video") !== isVideo)) {
+        batchContext.settle({success:false,uncertain:true,error:"Media type differs from selected item"});
+        return;
+      }
+      if (batchContext?.intercepts > 1) return;
 
       const taskId = "task_" + Date.now();
 
@@ -111,6 +123,7 @@
               mediaUrl: url || undefined,
               mediaType: isVideo ? "video" : "image",
               taskId,
+              batchAttempt: batchContext ? {batchId:batchContext.batchId,attemptId:batchContext.attemptId} : undefined,
               filename: filename || (isVideo ? `flowzero_${Date.now()}.mp4` : `flowzero_${Date.now()}.png`)
             },
             (res) => resolve(res || { success: false })
@@ -118,6 +131,7 @@
         });
 
         if (response && response.success) {
+          if (batchContext) batchContext.settle(response);
           // V8 plan Phase 5 UI contract: only format video timing stats when
           // media is a video AND the video-only fields actually exist. Image
           // stats (ncc/mode/threshold/pos) must never render as
@@ -138,9 +152,11 @@
             4000
           );
         } else {
+          if (batchContext) batchContext.settle({success:false,error:response?.error || "Processing failed"});
           showToast("Lỗi khi xóa watermark: " + (response?.error || "Không thành công"), "error", 4000);
         }
       } catch (err) {
+        if (batchContext) batchContext.settle({success:false,error:err.message});
         console.error("[FlowZero Content Message Error]:", err);
         showToast("Lỗi xử lý tải: " + err.message, "error", 4000);
       }
@@ -1187,6 +1203,43 @@
       showToast(message.progress.phase === "finalizing" ? "Đóng gói..." : `Đang xử lý (${message.progress.percent}%)`, "info", 0, message.progress.percent);
     }
   });
+
+  // Batch adapter: the normal single-file action remains untouched. A batch
+  // request only asks Flow's native menu to start a selected item; completion
+  // is separately confirmed via the extension-created Chrome download ID.
+  window.__flowZeroBatchBridge = {
+    canonical: getCanonicalMediaContainer,
+    source: getImageUrl,
+    enabled: () => isExtensionEnabled,
+    trigger: async (container, kind, quality, batchId, attemptId) => {
+      if (!isExtensionEnabled || window.__flowZeroBatchPending) throw new Error("Batch not ready");
+      const canonical = getCanonicalMediaContainer(container);
+      if (!canonical || !canonical.isConnected || !getImageUrl(canonical)) throw new Error("Selected card unavailable");
+      if ((kind === "video" && quality !== "720p") ||
+          (kind === "image" && !["1k","2k","4k"].includes(quality))) throw new Error("Invalid quality");
+      let settle;
+      const result = new Promise(resolve => { settle = resolve; });
+      let settled = false;
+      const ctx = {batchId,attemptId,kind,intercepts:0,
+        settle: (value) => { if (!settled) {settled=true;settle(value);} }};
+      window.__flowZeroBatchPending = ctx;
+      if (kind === "video") window._flowZeroPendingVideo = true;
+      let triggered = false;
+      try { triggered = await triggerFlowNativeDownload(canonical, quality); }
+      catch (error) { ctx.settle({success:false,error:error.message}); }
+      if (!triggered) {
+        ctx.settle({success:false,error:"Native menu did not confirm selection"});
+        window._flowZeroPendingVideo = false;
+      }
+      return {triggered,result};
+    },
+    finish: (batchId,attemptId) => {
+      const current = window.__flowZeroBatchPending;
+      if (current?.batchId === batchId && current?.attemptId === attemptId)
+        window.__flowZeroBatchPending = null;
+      window._flowZeroPendingVideo = false;
+    }
+  };
 
   function init() {
     injectStyles();
