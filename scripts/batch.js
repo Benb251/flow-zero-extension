@@ -9,6 +9,7 @@
   const LIMIT = 20, STORE = "flowzero_batch_snapshot_v1";
   const selected = new Map();
   const ephemeral = new WeakMap();
+  const patchedPositions = new Map();
   let serial = 0, mode = false, enabled = true, queue = null;
   let running = false, pauseRequested = false, toolbar = null, panel = null;
   let imageQuality = "2k";
@@ -68,7 +69,11 @@
     document.querySelectorAll(".flowzero-batch-checkbox").forEach(btn=> {
       if(!mode || !enabled || running || !btn.parentElement?.isConnected) btn.remove();
     });
-    if(!mode || !enabled || running) return;
+    if(!mode || !enabled || running) {
+      for(const [card,oldValue] of patchedPositions) if(card.isConnected) card.style.position=oldValue;
+      patchedPositions.clear();
+      return;
+    }
     const cards = new Set(Array.from(document.querySelectorAll(CARD_SELECTOR)).map(canonical).filter(Boolean));
     for(const card of cards) {
       if(!card.isConnected || card.getBoundingClientRect().width < 80) continue;
@@ -85,7 +90,10 @@
       btn.setAttribute("aria-pressed",String(selected.has(id)));btn.textContent=selected.has(id)?"✓":"+";
       for(const type of ["pointerdown","pointerup","mousedown","mouseup","touchstart","click"])
         btn.addEventListener(type,ev=>{ev.stopPropagation();if(type==="click"){ev.preventDefault();toggle(card);}});
-      if(getComputedStyle(card).position==="static") card.style.position="relative";
+      if(getComputedStyle(card).position==="static"){
+        if(!patchedPositions.has(card))patchedPositions.set(card,card.style.position);
+        card.style.position="relative";
+      }
       card.appendChild(btn);
     }
   }
@@ -139,7 +147,7 @@
     if(!panel){panel=node("div","",null,document.body);panel.id="flowzero-batch-panel";}
     if(!queue){panel.hidden=true;return;}
     if(!show && panel.hidden)return;
-    panel.hidden=false;panel.replaceChildren();
+    panel.hidden=false;panel.setAttribute("aria-live","polite");panel.replaceChildren();
     node("h3","Batch Download — "+queue.items.filter(x=>x.status==="completed").length+"/"+queue.items.length+" hoàn tất",null,panel);
     node("div","Mỗi file chỉ chuyển tiếp sau khi Chrome xác nhận đã lưu xong.",null,panel);
     if(running)node("button",pauseRequested?"Đang dừng…":"Dừng sau file hiện tại",
@@ -147,6 +155,14 @@
     if(!running && queue.paused && queue.items.some(x=>x.status==="queued") &&
       !queue.items.some(x=>x.status==="needs_review"))
       node("button","Tiếp tục file đang chờ",resume,panel);
+    if(!running && queue.items.some(i=>i.status==="failed") &&
+      !queue.items.some(i=>i.status==="needs_review"))
+      node("button","Thử lại file lỗi",async()=>{
+        for(const item of queue.items) if(item.status==="failed"){
+          item.status="queued";item.attemptId=null;item.downloadId=null;item.error=null;
+        }
+        queue.paused=false;await save();run();
+      },panel);
     if(!running) node("button","Đóng hàng đợi / chọn lại",async()=>{
       if(queue.items.some(i=>i.status==="needs_review") &&
          !confirm("Có tác vụ chưa rõ kết quả. Hãy kiểm tra Chrome Downloads trước khi đóng hàng đợi. Bạn đã kiểm tra?"))return;
@@ -219,7 +235,8 @@
           initiated=await bridge().trigger(card,item.kind,item.quality,queue.id,item.attemptId);
           item.status="native_triggered";await save();renderPanel(true);
           if(!initiated.triggered){
-            item.status="failed";item.error="Could not select native download";await save();continue;
+            item.status="needs_review";item.error="Native menu outcome uncertain; check Chrome Downloads";
+            queue.paused=true;await save();break;
           }
           const result=await waitForResult(initiated.result,90000);
           bridge()?.finish(queue.id,item.attemptId);
